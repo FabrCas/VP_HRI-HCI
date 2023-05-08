@@ -12,12 +12,12 @@ def parse_arguments():
     
     parser.add_argument('--useGPU', type=bool, default=True, help="Usage to make compitations on tensors")
     parser.add_argument('--verbose', type=bool, default=True, help="Verbose execution of the application")
-    
     parser.add_argument('--learning', type=bool, default=False, help="learning models, then execute")
     
+    parser.add_argument('--dataDir', type=str, default="data", help= "path value for the folder used to store the dataset")
     parser.add_argument('--saveDir', type=str, default='models', help='Folder in which are saved models')
     parser.add_argument('--resultDir', type=str, default='results', help='Folder in which are saved results')
-    parser.add_argument('--logDir', type=str, default='logs', help='Folder in which are saved logs')
+    # parser.add_argument('--logDir', type=str, default='logs', help='Folder in which are saved logs')
     
     
     # visual attention classifier parameters
@@ -79,24 +79,29 @@ def check_arguments(args):
  
 def main():
     args = parse_arguments()
+    
     if args is None: exit()
     
     if args.verbose:
         print("Current parameters set:")
         [print(str(k) +" -> "+ str(v)) for k,v in vars(args).items()]
-        
+    
+    # pipeline B 
+    
+    # pass args to classifier
 
     if args.learning:
         pass
     else:
         pass
+    
+    # pipeline A
             
-
-
 
 
 if (__name__ == "__main__"):
     start_time = time.time()
+    os.chdir("Documents/EAI1")                  # change directory to the correct project location
     main()
     time_exe = time.time() - start_time
     print(f"Execution time {time_exe}[s]")
