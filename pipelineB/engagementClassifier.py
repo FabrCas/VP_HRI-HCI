@@ -18,8 +18,8 @@ class EngagementClassifier(T.nn.Module):
     def printSummaryNetwork(self, inputShape = (None,None,None,None)):
         summary(self.model, inputShape)
         
-    def _saveModel(self, epoch, folder = self.args.saveDir):
-        path_save = os.path.join(folder)
+    def _saveModel(self, epoch):
+        path_save = os.path.join(self.args.saveDir)
         name = 'resNet-'+ str(epoch) +'.ckpt'
         if not os.path.exists(path_save):
             os.makedirs(path_save)
