@@ -12,6 +12,7 @@ class WebcamReader(object):
         # intialize None capturer and writer 
         self.capturer = None
         self.writer = None
+        self.cwd = "/".join(os.path.abspath(__file__).split("/")[:-1])
         self._create_folder()
         self.set_resolution()
 
@@ -64,7 +65,7 @@ class WebcamReader(object):
         self.writer = cv2.VideoWriter(self.path_save + '/capture.avi', self.fourcc, self.frame_rate, (self.width, self.height)) 
         
     
-    def readVideo(self, file_path, output_size = None, show = True):
+    def readVideo(self, name_file, output_size = None, show = True):
         """
             function to read any video, choose the size and whether to show the content.
             this function returns a numpy array containing the frames
@@ -73,9 +74,11 @@ class WebcamReader(object):
         frames = []
         
         if show: cv2.namedWindow('Video')
-        
+
+        path = self.cwd + "/" + self.path_save + "/" + name_file
+        print(path)
         # Open the video file for reading
-        cap = cv2.VideoCapture(file_path)
+        cap = cv2.VideoCapture(path)
         
         # Define the desired output size
         if output_size == None: output_size = (self.width, self.height)
@@ -171,8 +174,5 @@ if __name__ == "__main__":
     # print("webcam fps ->", webcam.capturer.get(cv2.CAP_PROP_FPS))
     # print("webcam frame width ->", webcam.capturer.get(cv2.CAP_PROP_FRAME_WIDTH))
     # print("webcam frame height ->", webcam.capturer.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    frames = webcam.readVideo("/home/faber/Documents/EAI1/data/webcam_records/capture.avi", show=False)
+    frames = webcam.readVideo("capture.avi", show=False)
     print("frames shape {}".format(frames.shape))
-
-        
-        
