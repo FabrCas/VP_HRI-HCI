@@ -1,14 +1,15 @@
 #%% 
-
-import deeplake
 from time import time
 import multiprocessing as mp
 import os
 import numpy as np
 import warnings
-import torch as T
 import matplotlib.pyplot as plt
+import deeplake
+import torch as T
 from torch.utils.data import Dataset, DataLoader
+import torchvision.transforms as transforms
+from torchvision.transforms.functional import InterpolationMode
 
 """
     The DAiSEE dataset is the first multi-label video classification dataset. It is made up of 9068 video snippets
@@ -18,25 +19,104 @@ from torch.utils.data import Dataset, DataLoader
 """
 
 class CustomDaisee(Dataset):
-    def __init__(self, data, verbose = False):
+    def __init__(self, data, vector_encoding= False, z_score_norm = False, verbose = False):
         self.data = data
         self.xs = data['video']
         self.ys = data['engagement']
+        self.vector_encoding = vector_encoding
+        self.z_score_norm = z_score_norm
         self.verbose = verbose
+        
+        # size images 
+        self.w = 640
+        self.h = 480
+        
+        self.transform = transforms.Compose([
+                # i can convert to grayscale here
+                transforms.ToTensor(),
+                transforms.Resize((self.h,self.w), interpolation= InterpolationMode.BILINEAR, antialias= True),
+                # RandAugment(),
+                # transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))   # values between -1 and 1 
+                transforms.Normalize((0,0,0), (1,1,1))                     # values between 0 and 1
+            ])
+        
+    def _preprocess(self, video):
+        video_frames_ppr = []
+        
+        for frame in video:
+            
+            # new_frame = self.transform(frame)     
+            
+            new_frame = transforms.ToTensor()(frame) # this change the frame dimension: [colours, width, height]
+            
+            new_frame = transforms.Resize((self.h,self.w), interpolation = InterpolationMode.BILINEAR, antialias= True)(new_frame)
+            
+            # gamma, saturation & sharpness correction, ...
+            new_frame = transforms.functional.adjust_gamma(new_frame, gamma = 0.8, gain = 1)
+            new_frame = transforms.functional.adjust_saturation(new_frame ,saturation_factor=1.2)
+            new_frame = transforms.functional.adjust_sharpness(new_frame,sharpness_factor=2)
+            
+            # z-score normalization?
+            if self.z_score_norm:
+                # Compute mean and standard deviation along each channel 
+                # TODO for all the data the mean and std
+                means = new_frame.mean(dim=(1, 2))
+                stds = new_frame.std(dim=(1, 2))
+
+                try:
+                    new_frame = transforms.Normalize(mean= means, std = stds)(new_frame)
+                except Exception as e:
+                    # handle division by zero cases
+                    new_frame = transforms.Normalize(mean= (0,0,0), std = (1,1,1))(new_frame)
+                
+            else:
+                # default normalization 
+                # new_frame = transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))(new_frame)   # values between -1 and 1 
+                new_frame = transforms.Normalize(mean= (0,0,0), std = (1,1,1))(new_frame) # values between 0 and 1
+            
+              
+            # TODO histogram equalization
+            # convert to histogram equalization
+            # new_frame = new_frame.to(T.uint8)           
+            # new_frame = transforms.functional.equalize(new_frame)
+            
+    
+            new_frame = new_frame.permute(1,2,0)
+            
+            video_frames_ppr.append(new_frame)      # back to the dimension: [width, height, colour ]
+    
+        return T.stack(video_frames_ppr)
+
+    def label2Vector(self, label):
+        label_v = np.zeros((1,4), dtype= np.int16)
+        label_v[:,label[0]] = 1
+        print(label_v)
+        return label_v
+
 
     def __len__(self):
         return len(self.data)
 
+
     def __getitem__(self, index):
 
-        x_data = self.xs[index].data()
+        x_data = self.xs[index].data()    # dim: frame, width, height, colours 
         y_data = self.ys[index].data()
         
         frames = x_data['frames']
-        # todo extract face
+        frames = self._preprocess(frames)
+        # TODO extract face
+        
         timestamps = x_data['timestamps']
         
-        label = y_data['value'].astype('int16')   #.numpy(dtype = np.int16)
+        
+        # choose if use ordinal encoding or one-hot encoding
+        
+        if not(self.vector_encoding):
+            label = y_data['value'].astype('int16')   #.numpy(dtype = np.int16)
+        else:
+            label = self.label2Vector(y_data['value'])
+        
         label_description = y_data["text"][0]
         
         if self.verbose:
@@ -64,6 +144,7 @@ class Dataset(object):
     
         # load data 
         self.load_dataset_offline()
+        self.print_loaderCustomDaisee(self.valid_dataloader)
         
     # getters dataloaders
     
@@ -88,7 +169,7 @@ class Dataset(object):
             deeplake.load("hub://activeloop/daisee-test", verbose= True, access_method= "download")
             deeplake.load("hub://activeloop/daisee-validation", verbose= True, access_method= "download")
             
-    def load_dataset_offline(self, batch_size = 1, workers = 4):
+    def load_dataset_offline(self, batch_size = 1, workers = 1): #workers = 4):
         """
             load the dataset (downloading first all the data) and returns the dataloaders
         """
@@ -223,6 +304,8 @@ class Dataset(object):
             
             # show first frame and its dimension 
             for frame in video:
+                
+                # print(frame)
                 if show_frames:   
                     plt.imshow(frame)
                     print(frame.shape)
