@@ -2,6 +2,7 @@
 from time import time
 import multiprocessing as mp
 import os
+import gc
 import numpy as np
 import warnings
 import matplotlib.pyplot as plt
@@ -31,59 +32,79 @@ class CustomDaisee(Dataset):
         self.w = 640
         self.h = 480
         
-        self.transform = transforms.Compose([
-                # i can convert to grayscale here
-                transforms.ToTensor(),
-                transforms.Resize((self.h,self.w), interpolation= InterpolationMode.BILINEAR, antialias= True),
-                # RandAugment(),
-                # transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))   # values between -1 and 1 
-                transforms.Normalize((0,0,0), (1,1,1))                     # values between 0 and 1
-            ])
+        # self.transform = transforms.Compose([
+        #         # i can convert to grayscale here
+        #         transforms.ToTensor(),
+        #         transforms.Resize((self.h,self.w), interpolation= InterpolationMode.BILINEAR, antialias= True),
+        #         # RandAugment(),
+        #         # transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))   # values between -1 and 1 
+        #         transforms.Normalize((0,0,0), (1,1,1))                     # values between 0 and 1
+        #     ])
+    
+    
+    
+    def _histoEq(self, frame):
+        # from np array to tensor with Torch axis order
+        frame = T.tensor(frame)
+        frame = frame.permute(2,0,1)  # to pytorch dimensions order
+
+        # Perform histogram equalization on each color channel
+        equalized_channels = [transforms.functional.equalize(channel.unsqueeze(0)) for channel in frame]
+
+        # Combine the equalized channels back into a color image tensor
+        new_frame = T.stack(equalized_channels).squeeze(1)
         
-    def _preprocess(self, video):
+        # new_frame = T.clamp(new_frame, 0, 1).to(T.float32)
+        
+        return new_frame
+     
+    def _preprocess(self, video, use_histo = False):
         video_frames_ppr = []
         
         for frame in video:
             
-            # new_frame = self.transform(frame)     
-            
-            new_frame = transforms.ToTensor()(frame) # this change the frame dimension: [colours, width, height]
-            
-            new_frame = transforms.Resize((self.h,self.w), interpolation = InterpolationMode.BILINEAR, antialias= True)(new_frame)
-            
-            # gamma, saturation & sharpness correction, ...
-            new_frame = transforms.functional.adjust_gamma(new_frame, gamma = 0.8, gain = 1)
-            new_frame = transforms.functional.adjust_saturation(new_frame ,saturation_factor=1.2)
-            new_frame = transforms.functional.adjust_sharpness(new_frame,sharpness_factor=2)
-            
-            # z-score normalization?
-            if self.z_score_norm:
-                # Compute mean and standard deviation along each channel 
-                # TODO for all the data the mean and std
-                means = new_frame.mean(dim=(1, 2))
-                stds = new_frame.std(dim=(1, 2))
-
-                try:
-                    new_frame = transforms.Normalize(mean= means, std = stds)(new_frame)
-                except Exception as e:
-                    # handle division by zero cases
-                    new_frame = transforms.Normalize(mean= (0,0,0), std = (1,1,1))(new_frame)
+            if use_histo:      
+                # first perform histogram equalization 
+                new_frame = self._histoEq(frame)
+                
+                # Resize: downsampling or upsampling (bilinear interpolation)
+                new_frame = transforms.Resize((self.h,self.w), interpolation = InterpolationMode.BILINEAR, antialias= True)(new_frame)
+                
+                # change the range from [0-255] to [0.; 1.]
+                new_frame = new_frame.float() / 255.
                 
             else:
-                # default normalization 
-                # new_frame = transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))(new_frame)   # values between -1 and 1 
-                new_frame = transforms.Normalize(mean= (0,0,0), std = (1,1,1))(new_frame) # values between 0 and 1
+                # transform to tensor and normalize the image to have mean = 0 and std = 1.
+                new_frame = transforms.ToTensor()(frame)                # this change the frame dimension: [colours, width, height]
+                
+                # Resize: downsampling or upsampling (bilinear interpolation)
+                new_frame = transforms.Resize((self.h,self.w), interpolation = InterpolationMode.BILINEAR, antialias= True)(new_frame)
+                
+                # gamma, saturation & sharpness correction, ...
+                new_frame = transforms.functional.adjust_gamma(new_frame, gamma = 0.8, gain = 1)
+                new_frame = transforms.functional.adjust_saturation(new_frame ,saturation_factor=1.2)
+                new_frame = transforms.functional.adjust_sharpness(new_frame,sharpness_factor=2)
+                
+                # z-score normalization?
+                if self.z_score_norm:
+                    # Compute mean and standard deviation along each channel 
+                    # TODO for all the data the mean and std
+                    means = new_frame.mean(dim=(1, 2))
+                    stds = new_frame.std(dim=(1, 2))
+
+                    try:
+                        new_frame = transforms.Normalize(mean= means, std = stds)(new_frame)
+                    except Exception as e:
+                        # handle division by zero cases
+                        new_frame = transforms.Normalize(mean= (0,0,0), std = (1,1,1))(new_frame)
+                    
+                # default normalization for values btw 0 and 1 already performed 
+
+            # back to the dimension: [width, height, colour]
+            # new_frame = new_frame.permute(1,2,0)  
             
-              
-            # TODO histogram equalization
-            # convert to histogram equalization
-            # new_frame = new_frame.to(T.uint8)           
-            # new_frame = transforms.functional.equalize(new_frame)
-            
-    
-            new_frame = new_frame.permute(1,2,0)
-            
-            video_frames_ppr.append(new_frame)      # back to the dimension: [width, height, colour ]
+            # includes all the frames in a list and then stack them
+            video_frames_ppr.append(new_frame)    
     
         return T.stack(video_frames_ppr)
 
@@ -97,14 +118,16 @@ class CustomDaisee(Dataset):
     def __len__(self):
         return len(self.data)
 
-
     def __getitem__(self, index):
 
         x_data = self.xs[index].data()    # dim: frame, width, height, colours 
         y_data = self.ys[index].data()
         
-        frames = x_data['frames']
-        frames = self._preprocess(frames)
+        frames_ = x_data['frames']
+        frames = self._preprocess(frames_, use_histo= False)
+        del frames_
+        gc.collect()
+        
         # TODO extract face
         
         timestamps = x_data['timestamps']
@@ -126,9 +149,8 @@ class CustomDaisee(Dataset):
             print(label_description)
         
         # Return the video and its label as a dictionary
-        sample = {'frames': frames, 'label': label, 'timestamps': timestamps, 'label_description': label_description}
-        return sample
-
+        # sample = {'frames': frames, 'label': label, 'timestamps': timestamps, 'label_description': label_description}
+        return frames, label, timestamps, label_description
 
 class Dataset(object):
     
@@ -144,16 +166,18 @@ class Dataset(object):
     
         # load data 
         self.load_dataset_offline()
-        self.print_loaderCustomDaisee(self.valid_dataloader)
+        # self.print_loaderCustomDaisee(self.valid_dataloader)
         
     # getters dataloaders
-    
+    @property
     def get_trainSet(self):
         return self.train_dataloader
 
+    @property
     def get_validationSet(self):
         return self.valid_dataloader
     
+    @property
     def get_testSet(self):
         return self.test_dataloader
 
@@ -175,18 +199,18 @@ class Dataset(object):
         """
         try:
             self.export_env_variable()
-            ds_train  = deeplake.load("hub://activeloop/daisee-train", verbose= True, access_method= "local")
-            # custom class for daisee dataset
-            custom_ds_train= CustomDaisee(ds_train)
-            train_dataloader = DataLoader(custom_ds_train, batch_size= batch_size, num_workers= workers, shuffle= True)
+            # ds_train  = deeplake.load("hub://activeloop/daisee-train", verbose= True, access_method= "local")
+            # # custom class for daisee dataset
+            # custom_ds_train= CustomDaisee(ds_train)
+            # train_dataloader = DataLoader(custom_ds_train, batch_size= batch_size, num_workers= workers, shuffle= True)
             
             ds_valid = deeplake.load("hub://activeloop/daisee-validation", verbose= True, access_method= "local")
             custom_ds_valid = CustomDaisee(ds_valid)
             valid_dataloader = DataLoader(custom_ds_valid, batch_size= batch_size, num_workers= workers, shuffle= False)
             
-            ds_test  = deeplake.load("hub://activeloop/daisee-test", verbose= True, access_method= "local")
-            custom_ds_test = CustomDaisee(ds_test)
-            test_dataloader = DataLoader(custom_ds_test, batch_size= batch_size, num_workers= workers, shuffle= False)
+            # ds_test  = deeplake.load("hub://activeloop/daisee-test", verbose= True, access_method= "local")
+            # custom_ds_test = CustomDaisee(ds_test)
+            # test_dataloader = DataLoader(custom_ds_test, batch_size= batch_size, num_workers= workers, shuffle= False)
             
         except Exception as e:
             print(e)
@@ -195,9 +219,9 @@ class Dataset(object):
             
             return self.load_dataset_offline(batch_size, workers)
             
-        self.train_dataloader = train_dataloader
+        # self.train_dataloader = train_dataloader
         self.valid_dataloader = valid_dataloader
-        self.test_dataloader  = test_dataloader
+        # self.test_dataloader  = test_dataloader
         
         return 
     
@@ -278,17 +302,18 @@ class Dataset(object):
             
     def print_loaderCustomDaisee(self, data_laoder, show_frames = True):
         
+        #frames, label, timestamps, label_description
+        
         print(type(data_laoder))
-        for idx, data in enumerate(data_laoder):
-            
+        for idx, data in enumerate(data_laoder):       
             # unpack data
-            video = T.squeeze(data['frames'], dim= 0)  # remove batch dimension
-            label = T.squeeze(data['label'], dim = 0)
-            timestamps = T.squeeze(data['timestamps'], dim=0)
-            label_description = data['label_description'][0]
+            video               = T.squeeze(data[0], dim= 0)  # remove batch dimension
+            label               = T.squeeze(data[1], dim = 0)
+            timestamps          = T.squeeze(data[2], dim=0)
+            label_description   = data[3][0]
             
             # show types
-            print(type(data['frames']))
+            print(type(video))
             print(type(label))
             print(type(timestamps))
             print(type(label_description))
@@ -305,8 +330,10 @@ class Dataset(object):
             # show first frame and its dimension 
             for frame in video:
                 
-                # print(frame)
-                if show_frames:   
+                print(frame.shape)
+                
+                if show_frames:  
+                    frame = frame.permute(1,2,0) # re-ordering dimensions to show
                     plt.imshow(frame)
                     print(frame.shape)
                     plt.show()
@@ -314,5 +341,7 @@ class Dataset(object):
             
             break
         
-     
-custom_daisee = Dataset()
+          
+# test the dataset class 
+# dataset = Dataset()
+# dataset.print_loaderCustomDaisee(dataset.get_validationSet)
