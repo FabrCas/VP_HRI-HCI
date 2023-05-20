@@ -58,7 +58,7 @@ class CustomDaisee(Dataset):
         
         return new_frame
      
-    def _preprocess(self, video, use_histo = False):
+    def preprocess(self, video, use_histo = False):
         video_frames_ppr = []
         
         for frame in video:
@@ -109,9 +109,9 @@ class CustomDaisee(Dataset):
         return T.stack(video_frames_ppr)
 
     def label2Vector(self, label):
-        label_v = np.zeros((1,4), dtype= np.int16)
+        label_v = np.zeros((1,4), dtype= np.int32)
         label_v[:,label[0]] = 1
-        print(label_v)
+        # print(label_v)
         return label_v
 
 
@@ -124,7 +124,9 @@ class CustomDaisee(Dataset):
         y_data = self.ys[index].data()
         
         frames_ = x_data['frames']
-        frames = self._preprocess(frames_, use_histo= False)
+        frames = self.preprocess(frames_, use_histo= False)
+        frames = frames.to(T.float16)
+        
         del frames_
         gc.collect()
         
@@ -136,9 +138,11 @@ class CustomDaisee(Dataset):
         # choose if use ordinal encoding or one-hot encoding
         
         if not(self.vector_encoding):
-            label = y_data['value'].astype('int16')   #.numpy(dtype = np.int16)
+            label = y_data['value'].astype('int64')   #.numpy(dtype = np.int16)
+            label = np.squeeze(label, axis  = 0)
         else:
             label = self.label2Vector(y_data['value'])
+            label = np.squeeze(label, axis = 0)
         
         label_description = y_data["text"][0]
         
@@ -154,10 +158,12 @@ class CustomDaisee(Dataset):
 
 class Dataset(object):
     
-    def __init__(self):
+    def __init__(self, batch_size = 1, use_grayscale = False):
         super().__init__()
         
         self.DATASET_PATH = "/home/faber/Documents/EAI1/data"
+        self.batch_size = batch_size 
+        self.grayscale = use_grayscale
         
         # initialize dataloaders 
         self.train_dataloader = None
@@ -169,15 +175,13 @@ class Dataset(object):
         # self.print_loaderCustomDaisee(self.valid_dataloader)
         
     # getters dataloaders
-    @property
+
     def get_trainSet(self):
         return self.train_dataloader
 
-    @property
     def get_validationSet(self):
         return self.valid_dataloader
-    
-    @property
+
     def get_testSet(self):
         return self.test_dataloader
 
@@ -193,7 +197,7 @@ class Dataset(object):
             deeplake.load("hub://activeloop/daisee-test", verbose= True, access_method= "download")
             deeplake.load("hub://activeloop/daisee-validation", verbose= True, access_method= "download")
             
-    def load_dataset_offline(self, batch_size = 1, workers = 1): #workers = 4):
+    def load_dataset_offline(self, workers = 1): #workers = 4):
         """
             load the dataset (downloading first all the data) and returns the dataloaders
         """
@@ -202,15 +206,15 @@ class Dataset(object):
             # ds_train  = deeplake.load("hub://activeloop/daisee-train", verbose= True, access_method= "local")
             # # custom class for daisee dataset
             # custom_ds_train= CustomDaisee(ds_train)
-            # train_dataloader = DataLoader(custom_ds_train, batch_size= batch_size, num_workers= workers, shuffle= True)
+            # train_dataloader = DataLoader(custom_ds_train, batch_size= self.batch_size, num_workers= workers, shuffle= True)
             
-            ds_valid = deeplake.load("hub://activeloop/daisee-validation", verbose= True, access_method= "local")
+            ds_valid = deeplake.load("hub://activeloop/daisee-validation", verbose= False, access_method= "local")
             custom_ds_valid = CustomDaisee(ds_valid)
-            valid_dataloader = DataLoader(custom_ds_valid, batch_size= batch_size, num_workers= workers, shuffle= False)
+            valid_dataloader = DataLoader(custom_ds_valid, batch_size= self.batch_size, num_workers= workers, shuffle= False)
             
             # ds_test  = deeplake.load("hub://activeloop/daisee-test", verbose= True, access_method= "local")
             # custom_ds_test = CustomDaisee(ds_test)
-            # test_dataloader = DataLoader(custom_ds_test, batch_size= batch_size, num_workers= workers, shuffle= False)
+            # test_dataloader = DataLoader(custom_ds_test, batch_size= self.batch_size, num_workers= workers, shuffle= False)
             
         except Exception as e:
             print(e)

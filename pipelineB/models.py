@@ -327,11 +327,12 @@ class ResNet3D(nn.Module):
     # channel -> colors image
     # classes -> unique labels for the classification
     
-    def __init__(self, depth_level = 2, n_channels = 3, n_classes = 4):
+    def __init__(self, depth_level = 2, n_channels = 3, n_classes = 4, verbose = False):
         super(ResNet3D,self).__init__()
         self.n_channels = n_channels
         self.n_classes = n_classes
         self.exp_coeff = 4 # output/input feature dimension ratio in bottleneck   
+        self.verbose = verbose
     
         
         print("Creating the RNN (3D)...")
@@ -397,23 +398,23 @@ class ResNet3D(nn.Module):
             ds_layer = None
     
 
-        print("number of blocks fm {} -> {}".format(n_fm, n_blocks))
+        if self.verbose: print("number of blocks fm {} -> {}".format(n_fm, n_blocks))
         # first layer to get the right feature map
         if self.depth_level < 2:
-            print("building small block n°1")
+            if self.verbose: print("building small block n°1")
             list_layers.append(Bottleneck_block3D_s(self.input_ch, n_fm, ds_layer= ds_layer, stride = stride))
         else:
-            print("building big blocks n°1")
+            if self.verbose: print("building big blocks n°1")
             list_layers.append(Bottleneck_block3D_l(self.input_ch, n_fm, ds_layer= ds_layer, stride = stride))
         self.input_ch = n_fm * self.exp_coeff
         
         # include all the layers from the bottleneck blocks
         for index, _ in enumerate(range(n_blocks -1)):
             if self.depth_level < 2:
-                print("building small block n°{}".format(index +2))
+                if self.verbose: print("building small block n°{}".format(index +2))
                 list_layers.append(Bottleneck_block3D_s(self.input_ch, n_fm))
             else:
-                print("building big blocks n°{}".format(index +2))
+                if self.verbose: print("building big blocks n°{}".format(index +2))
                 list_layers.append(Bottleneck_block3D_l(self.input_ch, n_fm))
         
         return nn.Sequential(*list_layers)

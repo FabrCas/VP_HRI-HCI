@@ -1,5 +1,6 @@
 import cv2
 import os
+import re
 import numpy as np
 
 class WebcamReader(object):
@@ -7,7 +8,7 @@ class WebcamReader(object):
         super().__init__()
         self.frame_rate = frame_rate
         self.resolution = resolution                        # higher resolution can automatically reduces the fps since usb port has a limited bandwidth
-        self.path_save = "data/webcam_records"
+        self.path_save = "./webcam_records"
         
         # intialize None capturer and writer 
         self.capturer = None
@@ -30,8 +31,6 @@ class WebcamReader(object):
         else:
             raise ValueError("Not valid resolution")
 
-    
-    
     def set_frameRate(self, frame_rate = None):
         # Set the frame rate of the video capture (not the one used from the codec)
         self.frame_rate = frame_rate
@@ -47,8 +46,25 @@ class WebcamReader(object):
         if not('webcam_records' in os.listdir()):
             os.mkdir("webcam_records")
             
+    def _get_prog_captures(self):
+        files = os.listdir(self.path_save)
+        test_prog = -1
+        for file in files:
+            print(file)
+            match = re.search(r"^\d*_\d*_testSet.avi$", file)
+            if match is not(None):
+                print("match")
+                prog = int(file.split("_")[0])
+                if prog > test_prog: 
+                    test_prog = prog
+                    
+        return test_prog+1
             
-    def open(self):
+        
+        
+            
+            
+    def _open(self, candidate_id = None):
         # give name to the window
         cv2.namedWindow('Webcam')
         # Initialize the video capture object
@@ -57,14 +73,85 @@ class WebcamReader(object):
         # Set the resolution of the frames
         self.capturer.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
         self.capturer.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
+        
         # Define the codec and create a VideoWriter object
         # self.fourcc = cv2.VideoWriter_fourcc(*'H264')                                                                                   # fourcc = cv2.VideoWriter_fourcc(*'XVID')
         # self.writer = cv2.VideoWriter(self.path_save + '/capture.mp4', self.fourcc, self.frame_rate, (self.width, self.height))         # out = cv2.VideoWriter('output.avi', fourcc, 30.0, (640, 480))
  
         self.fourcc = cv2.VideoWriter_fourcc(*'XVID')
-        self.writer = cv2.VideoWriter(self.path_save + '/capture.avi', self.fourcc, self.frame_rate, (self.width, self.height)) 
-        
+        if candidate_id is not(None):
+            progressive = self._get_prog_captures()
+            path = self.path_save + '/' + str(progressive) + '_' + str(candidate_id) + '_' +'testSet.avi'
+            print(path)
+            try:
+
+                self.writer = cv2.VideoWriter(path, self.fourcc, self.frame_rate, (self.width, self.height))
+            except:
+                print("no available path to save")
     
+    def _close(self):
+        
+        # print recording setting
+        print("webcam fps ->", webcam.capturer.get(cv2.CAP_PROP_FPS))
+        print("webcam frame width ->", webcam.capturer.get(cv2.CAP_PROP_FRAME_WIDTH))
+        print("webcam frame height ->", webcam.capturer.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        
+        # Release the video capture object and close the window
+        self.capturer.release()
+        try:
+            self.writer.release()
+        except:
+            pass  # no instantated
+        cv2.destroyAllWindows()
+        
+    def show(self, save= True):
+        if self.capturer == None or self.writer == None:
+            if save:
+                try:
+                    candidate_id = int(input("Insert the candidate id\n"))
+                except:
+                    candidate_id = None
+            else:
+                candidate_id = None
+                
+            self._open(candidate_id)         
+        
+        # Loop through frames until the user exits
+        while True:
+            # Read a frame from the video capture object
+            ret, frame = self.capturer.read()
+            
+            if not(ret):
+                print("Missing frame...")
+            else:
+            
+                # Display the frame in a window
+                cv2.imshow('Webcam', frame)
+                
+                if save:
+                    self.writer.write(frame)
+
+                # store the use input with delay
+                key = cv2.waitKey(1)
+                
+                # Wait for the user to press 'q' to exit
+                if key & 0xFF == ord('q'):
+                    print('q is pressed closing all windows')
+                    break
+                
+                # Wait for the user to press 'ESC' to exit
+                if key == 27:
+                    print('esc is pressed closing all windows')
+                    cv2.destroyAllWindows()
+                    break
+                
+                # Check if the user has closed the window
+                if cv2.getWindowProperty("Webcam", cv2.WND_PROP_VISIBLE) <1:
+                    print("Closing...")
+                    break
+                
+        self._close()
+        
     def readVideo(self, name_file, output_size = None, show = True):
         """
             function to read any video, choose the size and whether to show the content.
@@ -117,62 +204,20 @@ class WebcamReader(object):
         cap.release()
         if show: cv2.destroyAllWindows()
         
+        # return the numpy array representing the video frames
         return np.array(frames)
         
-        
-    def close(self):
-        # Release the video capture object and close the window
-        self.capturer.release()
-        self.writer.release()
-        cv2.destroyAllWindows()
-        
-    def show(self, save= True):
-        if self.capturer == None or self.writer == None:
-            self.open()         
-        
-        # Loop through frames until the user exits
-        while True:
-            # Read a frame from the video capture object
-            ret, frame = self.capturer.read()
-            
-            if not(ret):
-                print("Missing frame...")
-            else:
-            
-                # Display the frame in a window
-                cv2.imshow('Webcam', frame)
-                
-                if save:
-                    self.writer.write(frame)
-
-                # store the use input with delay
-                key = cv2.waitKey(1)
-                
-                # Wait for the user to press 'q' to exit
-                if key & 0xFF == ord('q'):
-                    print('q is pressed closing all windows')
-                    break
-                
-                # Wait for the user to press 'ESC' to exit
-                if key == 27:
-                    print('esc is pressed closing all windows')
-                    cv2.destroyAllWindows()
-                    break
-                
-                # Check if the user has closed the window
-                if cv2.getWindowProperty("Webcam", cv2.WND_PROP_VISIBLE) <1:
-                    print("Closing...")
-                    break
-                
-        self.close()
-        
-        
-if __name__ == "__main__":
-    webcam = WebcamReader(resolution= 480)
-    webcam.set_frameRate(30)
-    # webcam.show(save= False)
-    # print("webcam fps ->", webcam.capturer.get(cv2.CAP_PROP_FPS))
-    # print("webcam frame width ->", webcam.capturer.get(cv2.CAP_PROP_FRAME_WIDTH))
-    # print("webcam frame height ->", webcam.capturer.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    frames = webcam.readVideo("capture.avi", show=False)
+# ------------------- test functions
+def test_reading(webcam):
+    frames = webcam.readVideo("test_capture.avi", show=True)
     print("frames shape {}".format(frames.shape))
+    
+def test_capture(webcam):
+    webcam.show(save= True)
+
+if __name__ == "__main__":
+    webcam = WebcamReader(frame_rate=30, resolution= 480)
+    test_capture(webcam)
+
+    
+
