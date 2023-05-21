@@ -4,7 +4,7 @@ import re
 import numpy as np
 
 class WebcamReader(object):
-    def __init__(self, frame_rate = 30, resolution = 480):
+    def __init__(self, frame_rate = 15, resolution = 480):
         super().__init__()
         self.frame_rate = frame_rate
         self.resolution = resolution                        # higher resolution can automatically reduces the fps since usb port has a limited bandwidth
@@ -22,6 +22,10 @@ class WebcamReader(object):
         if self.resolution == 240:
             self.width = 320
             self.height = 240
+        elif self.resolution == 360:
+            self.width = 640
+            self.height = 360    
+            
         elif self.resolution == 480:
             self.width = 640
             self.height = 480
@@ -51,7 +55,7 @@ class WebcamReader(object):
         test_prog = -1
         for file in files:
             print(file)
-            match = re.search(r"^\d*_\d*_testSet.avi$", file)
+            match = re.search(r"^\d*_\d*_testSet.mp4$", file)
             if match is not(None):
                 print("match")
                 prog = int(file.split("_")[0])
@@ -60,31 +64,33 @@ class WebcamReader(object):
                     
         return test_prog+1
             
-        
-        
-            
-            
     def _open(self, candidate_id = None):
         # give name to the window
         cv2.namedWindow('Webcam')
         # Initialize the video capture object
         self.capturer = cv2.VideoCapture(0)
-        self.capturer.set(cv2.CAP_PROP_FPS, self.frame_rate)
+        
         # Set the resolution of the frames
         self.capturer.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
         self.capturer.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
+        self.capturer.set(cv2.CAP_PROP_FPS, self.frame_rate)
         
         # Define the codec and create a VideoWriter object
         # self.fourcc = cv2.VideoWriter_fourcc(*'H264')                                                                                   # fourcc = cv2.VideoWriter_fourcc(*'XVID')
         # self.writer = cv2.VideoWriter(self.path_save + '/capture.mp4', self.fourcc, self.frame_rate, (self.width, self.height))         # out = cv2.VideoWriter('output.avi', fourcc, 30.0, (640, 480))
  
-        self.fourcc = cv2.VideoWriter_fourcc(*'XVID')
+        # self.fourcc = cv2.VideoWriter_fourcc(*'XVID')
+        self.fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        
+        
         if candidate_id is not(None):
             progressive = self._get_prog_captures()
-            path = self.path_save + '/' + str(progressive) + '_' + str(candidate_id) + '_' +'testSet.avi'
+            # path = self.path_save + '/' + str(progressive) + '_' + str(candidate_id) + '_' +'testSet.avi'
+            path = self.path_save + '/' + str(progressive) + '_' + str(candidate_id) + '_' +'testSet.mp4'
             print(path)
             try:
-
+                print("fps recording -> ", webcam.capturer.get(cv2.CAP_PROP_FPS))
+                # self.writer = cv2.VideoWriter(path, self.fourcc, webcam.capturer.get(cv2.CAP_PROP_FPS), (self.width, self.height))
                 self.writer = cv2.VideoWriter(path, self.fourcc, self.frame_rate, (self.width, self.height))
             except:
                 print("no available path to save")
@@ -110,6 +116,7 @@ class WebcamReader(object):
                 try:
                     candidate_id = int(input("Insert the candidate id\n"))
                 except:
+                    print("Not valid candidate id, the value must be an integer.\n The video will be not recorded")
                     candidate_id = None
             else:
                 candidate_id = None
@@ -119,7 +126,7 @@ class WebcamReader(object):
         # Loop through frames until the user exits
         while True:
             # Read a frame from the video capture object
-            ret, frame = self.capturer.read()
+            ret, frame = self.capturer.read()    # BGR channels format 
             
             if not(ret):
                 print("Missing frame...")
@@ -128,7 +135,7 @@ class WebcamReader(object):
                 # Display the frame in a window
                 cv2.imshow('Webcam', frame)
                 
-                if save:
+                if save and not(candidate_id is None):
                     self.writer.write(frame)
 
                 # store the use input with delay
@@ -216,7 +223,7 @@ def test_capture(webcam):
     webcam.show(save= True)
 
 if __name__ == "__main__":
-    webcam = WebcamReader(frame_rate=30, resolution= 480)
+    webcam = WebcamReader(frame_rate=15, resolution= 480)
     test_capture(webcam)
 
     
