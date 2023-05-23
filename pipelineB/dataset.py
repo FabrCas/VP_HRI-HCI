@@ -28,13 +28,14 @@ from torchvision.transforms.functional import InterpolationMode
 """
 
 class CustomDaisee(Dataset):
-    def __init__(self, type_ds: str, version: str, verbose = False):
+    def __init__(self, type_ds: str, version: str, verbose : bool = False, just_label : bool = False):
         super(CustomDaisee).__init__()
         
         self.check_args(version, type_ds)
-        self.type_ds = type_ds
-        self.version = version
-        self.verbose = verbose
+        self.type_ds    = type_ds
+        self.version    = version
+        self.verbose    = verbose
+        self.just_label = just_label
         
         # create path
         self.path_dataset           =  os.path.join("./data/customDAISEE_" + version, type_ds) # rel path from EAI1
@@ -128,6 +129,9 @@ class CustomDaisee(Dataset):
         data =  json.loads(json_data)
         label = data['label']
         
+        if self.just_label:
+            return label
+        
         # load video
         path_video = os.path.join(self.path_dataset_video, self.list_videos[index])
         frames  = self.readVideo(path= path_video, read_RGB = False)              # torch.Size([300, 3, 480, 640]) BGR frames       
@@ -140,7 +144,7 @@ class CustomDaisee(Dataset):
         # Return the video and its label as a dictionary
         # sample = {'frames': frames, 'label': label, 'timestamps': timestamps, 'label_description': label_description}
         
-        return frames, label # frames, label, timestamps, label_description
+        return frames, label
 
 class Dataset(object):
     
@@ -179,6 +183,13 @@ class Dataset(object):
 
     def get_testSet(self):
         return self.test_dataloader
+
+    def get_dataloaderLabelsTrain(self):
+        custom_ds_train= CustomDaisee(type_ds="train", version="v1", just_label = True)
+        dataloader_labelsTrain = DataLoader(custom_ds_train, batch_size= 1, num_workers= 0, shuffle= False)
+        return dataloader_labelsTrain
+        
+
 
     # ------------------------- pre-processing functions
     
@@ -227,7 +238,6 @@ class Dataset(object):
                 # z-score normalization?
                 if self.z_score_norm:
                     # Compute mean and standard deviation along each channel 
-                    # TODO for all the data the mean and std
                     means = new_frame.mean(dim=(1, 2))
                     stds = new_frame.std(dim=(1, 2))
 
@@ -389,7 +399,7 @@ class Dataset(object):
             return
           
     def saveCustomDataset_v2(self, type_ds, name_path = "./data/customDAISEE_v2"):
-        # TODO
+        # TODO dataset v2
         pass
     
          

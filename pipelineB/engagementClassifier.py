@@ -63,6 +63,7 @@ class EngagementClassifier(nn.Module):
         # learning parameters
         self.lr = 1e-4
         self.n_epochs = 1 # 5
+        self.learning_weights = [161.235, 25.617, 2.069, 2.121]   # weights from self.compute_class_weights(), no needed to recompute
     
     # ---------------- [initialization functions]
     
@@ -96,20 +97,58 @@ class EngagementClassifier(nn.Module):
         x_sampled = x[:,start_frame_index:end_frame_index]
         return x_sampled
     
-    def compute_class_weights(self, labels):
+    def compute_class_weights(self):
+        
+        print("Computing the weights for the training set")
+        # get train dataset using single mini-batch size
+        laoder = self.dataset.get_dataloaderLabelsTrain()
+        
+        # compute occurrences of labels
         class_freq={}
-        total = len(labels)
-        for l in labels:
+        total = len(laoder)
+        for y  in tqdm(laoder, total= total):
+            l = y.item()
             if l not in class_freq.keys():
-                class_freq[l] = 0
+                class_freq[l] = 1
             else:
                 class_freq[l] = class_freq[l]+1
+        print("class_freq -> ", class_freq)
+        
+        # compute the weights   
         class_weights = []
         for class_ in sorted(class_freq.keys()):
             freq = class_freq[class_]
             class_weights.append(total/freq)
 
+        print("class_weights-> ", class_weights)
         return class_weights
+    
+    
+    def focal_loss(y_pred, y_true, alpha=None, gamma=2, reduction='mean'):
+        """
+            focal loss implementation to handle to problem of unbalanced classes
+            y_pred -> logits from the model
+            y_true -> ground truth label for the sample (no one-hot encoding)
+            alpha -> weights for the classes
+            gamma -> parameter controls the rate at which the focal term decreases with increasing predicted probability
+            reduction -> choose between sum or mean to reduce over results in a batch
+        """
+        
+        ce_loss = F.cross_entropy(y_pred, y_true, reduction='none')
+        pt = T.exp(-ce_loss)
+        focal_loss = (1 - pt) ** gamma * ce_loss
+        
+        if alpha is not None:
+            # Apply class-specific alpha weights
+            alpha = alpha.to(y_pred.device)
+            focal_loss = alpha * focal_loss
+
+        if reduction == 'mean':
+            focal_loss = focal_loss.mean()
+        elif reduction == 'sum':
+            focal_loss = focal_loss.sum()
+
+        return focal_loss
     
     # ---------------- [Train & Test functions]
 
@@ -287,5 +326,8 @@ def test_training():
     
 # test_forward_2D()
 # test_forward_3D()
-test_training()
+# test_training()
 
+
+classifier = EngagementClassifier(batch_size= 1)
+classifier.compute_class_weights()
