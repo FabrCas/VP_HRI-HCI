@@ -10,6 +10,10 @@ import numpy as np
 import warnings
 import matplotlib.pyplot as plt
 import deeplake
+import random
+random.seed(22)
+
+# torch import 
 import torch as T
 from torch.utils.data import Dataset, DataLoader
 import torchvision.transforms as transforms
@@ -24,17 +28,26 @@ from torchvision.transforms.functional import InterpolationMode
 """
 
 class CustomDaisee(Dataset):
-    def __init__(self, data, vector_encoding= False, z_score_norm = False, verbose = False):
-        self.data = data
-        self.xs = data['video']
-        self.ys = data['engagement']
-        self.vector_encoding = vector_encoding
-        self.z_score_norm = z_score_norm
+    def __init__(self, type_ds: str, version: str, verbose = False):
+        super(CustomDaisee).__init__()
+        
+        self.check_args(version, type_ds)
+        self.type_ds = type_ds
+        self.version = version
         self.verbose = verbose
         
-        # size images 
-        self.w = 640
-        self.h = 480
+        # create path
+        self.path_dataset           =  os.path.join("./data/customDAISEE_" + version, type_ds) # rel path from EAI1
+        self.path_dataset_labels    =  os.path.join(self.path_dataset, "gt")
+        self.path_dataset_video     =  os.path.join(self.path_dataset, "video")
+        
+        # list of files
+        
+        get_id_labels = lambda x: int(x.split('_')[1].replace(".json", ""))
+        get_id_video  = lambda x: int(x.split('_')[1].replace(".mp4", ""))
+        
+        self.list_gts    =  sorted(os.listdir(self.path_dataset_labels),    key = get_id_labels)
+        self.list_videos =  sorted(os.listdir(self.path_dataset_video),     key = get_id_video)
         
         # self.transform = transforms.Compose([
         #         # i can convert to grayscale here
@@ -44,119 +57,90 @@ class CustomDaisee(Dataset):
         #         # transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))   # values between -1 and 1 
         #         transforms.Normalize((0,0,0), (1,1,1))                     # values between 0 and 1
         #     ])
-    
-    
-    
-    def _histoEq(self, frame):
-        # from np array to tensor with Torch axis order
-        frame = T.tensor(frame)
-        frame = frame.permute(2,0,1)  # to pytorch dimensions order
-
-        # Perform histogram equalization on each color channel
-        equalized_channels = [transforms.functional.equalize(channel.unsqueeze(0)) for channel in frame]
-
-        # Combine the equalized channels back into a color image tensor
-        new_frame = T.stack(equalized_channels).squeeze(1)
         
-        # new_frame = T.clamp(new_frame, 0, 1).to(T.float32)
+        self.random_augment = transforms.RandAugment()
+        self.toTensor = transforms.ToTensor()
+      
+    def check_args(self, version, type_ds):
+        if (type_ds not in ['train', 'test', 'validation']) or (version not in ["v1", "v2"]):
+            raise ValueError("Not valid arguments for the class {}".format(self.__class__.__name__))
         
-        return new_frame
+    def readVideo(self, path, read_RGB = False):
+        """
+            read a video from name file using the relative path of the dataset type
+        """
+        
+        # define the empty list that will contains the frames
+        frames = []
+        
+        # Open the video file for reading
+        capture = cv2.VideoCapture(path)
+        
+        # Check if the video file was opened successfully
+        if not capture.isOpened():
+            print('Error opening video file')
+            exit()
+
+        # Read and process each frame of the video
+        while True:
+            # Read a frame from the video
+            ret, frame = capture.read()   # frame -> (480, 640, 3)
+            
+            # If we have reached the end of the video, break out of the loop
+            if not ret:
+                break
+            
+            # sometimes last frame is None
+            if frame is not None:
+                
+                # from BGR to RGB if requested
+                if read_RGB:
+                    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                
+                # TODO if training add randargument
+                
+                # convert image to a tensor with values between 0 and 1, and colors channel moved: from (w,h,c) -> (c,w,h)
+                frame = self.toTensor(frame)    # torch.Size([3, 480, 640])
+                
+                # fill the list of frames
+                frames.append(frame)
+
+        # Release the video capture object and close all windows
+        capture.release()
+        
+        # return the Torch  tensor representing the video frames
+        video = T.stack(frames)
+        
+        if video.shape[0] > 300:
+            video = video[:300]
+               
+        return video
      
-    def preprocess(self, video, use_histo = False):
-        video_frames_ppr = []
-        
-        for frame in video:
-            
-            if use_histo:      
-                # first perform histogram equalization 
-                new_frame = self._histoEq(frame)
-                
-                # Resize: downsampling or upsampling (bilinear interpolation)
-                new_frame = transforms.Resize((self.h,self.w), interpolation = InterpolationMode.BILINEAR, antialias= True)(new_frame)
-                
-                # change the range from [0-255] to [0.; 1.]
-                new_frame = new_frame.float() / 255.
-                
-            else:
-                # transform to tensor and normalize the image to have mean = 0 and std = 1.
-                new_frame = transforms.ToTensor()(frame)                # this change the frame dimension: [colours, height, width]
-                
-                # Resize: downsampling or upsampling (bilinear interpolation)
-                new_frame = transforms.Resize((self.h,self.w), interpolation = InterpolationMode.BILINEAR, antialias= True)(new_frame)
-                
-                # gamma, saturation & sharpness correction, ...
-                new_frame = transforms.functional.adjust_gamma(new_frame, gamma = 0.8, gain = 1)
-                new_frame = transforms.functional.adjust_saturation(new_frame ,saturation_factor=1.2)
-                new_frame = transforms.functional.adjust_sharpness(new_frame,sharpness_factor=2)
-                
-                # z-score normalization?
-                if self.z_score_norm:
-                    # Compute mean and standard deviation along each channel 
-                    # TODO for all the data the mean and std
-                    means = new_frame.mean(dim=(1, 2))
-                    stds = new_frame.std(dim=(1, 2))
-
-                    try:
-                        new_frame = transforms.Normalize(mean= means, std = stds)(new_frame)
-                    except Exception as e:
-                        # handle division by zero cases
-                        new_frame = transforms.Normalize(mean= (0,0,0), std = (1,1,1))(new_frame)
-                    
-                # default normalization for values btw 0 and 1 already performed 
-
-            # back to the dimension: [height, width, colour]
-            # new_frame = new_frame.permute(1,2,0)  
-            
-            # includes all the frames in a list and then stack them
-            video_frames_ppr.append(new_frame)    
-    
-        return T.stack(video_frames_ppr)
-
-    def label2Vector(self, label):
-        label_v = np.zeros((1,4), dtype= np.int32)
-        label_v[:,label[0]] = 1
-        # print(label_v)
-        return label_v
-
-
     def __len__(self):
-        return len(self.data)
+        return len(self.list_gts)
 
-    def __getitem__(self, index):
+    def __getitem__(self, index, show = False):
+        
+        # load gt
+        path_gt = os.path.join(self.path_dataset_labels, self.list_gts[index])
+        with open(path_gt, "r") as file:
+            json_data = file.read()
+        data =  json.loads(json_data)
+        label = data['label']
+        
+        # load video
+        path_video = os.path.join(self.path_dataset_video, self.list_videos[index])
+        frames  = self.readVideo(path= path_video, read_RGB = False)              # torch.Size([300, 3, 480, 640]) BGR frames       
+        
+        if show: 
+            # remember matplotib expect an image with the RGB convention! otherwise the colors are altered
+            plt.imshow(frames[0].permute(1,2,0))
+            plt.show()
 
-        x_data = self.xs[index].data()    # dim: frame, height, width, colours 
-        y_data = self.ys[index].data()
-        
-        # frames = x_data['frames']
-        frames_ = x_data['frames']
-        frames = self.preprocess(frames_, use_histo= False)
-        frames = frames.to(T.float16)
-        
-        del frames_
-        gc.collect()
-        
-        timestamps = x_data['timestamps']
-        
-        # choose if use ordinal encoding or one-hot encoding
-        
-        if not(self.vector_encoding):
-            label = y_data['value'].astype('int64')   #.numpy(dtype = np.int16)
-            label = np.squeeze(label, axis  = 0)
-        else:
-            label = self.label2Vector(y_data['value'])
-            label = np.squeeze(label, axis = 0)
-        
-        label_description = y_data["text"][0]
-        
-        if self.verbose:
-            print(frames.shape)
-            print(timestamps.shape)
-            print(label)
-            print(label_description)
-        
         # Return the video and its label as a dictionary
         # sample = {'frames': frames, 'label': label, 'timestamps': timestamps, 'label_description': label_description}
-        return frames, label, timestamps, label_description
+        
+        return frames, label # frames, label, timestamps, label_description
 
 class Dataset(object):
     
@@ -164,7 +148,6 @@ class Dataset(object):
         super().__init__()
         
         self.DATASET_PATH = "/home/faber/Documents/EAI1/data"
-        self.DATASET_PATH_CUSTOM = "./data/customDAISEE"
         self.batch_size = batch_size
         self.verbose = verbose
         
@@ -180,11 +163,10 @@ class Dataset(object):
         self.h = 480
         self.vector_encoding    = False
         self.z_score_norm       = False
-        # Define the video codec and output file name
         self.fourcc = cv2.VideoWriter_fourcc(*'mp4v')  # Codec for MP4 video
     
         # load data 
-        self.load_dataset_offline()
+        self.load_dataset_offline(workers= 0)
         
         
     # ------------------------- getters dataloaders
@@ -218,7 +200,7 @@ class Dataset(object):
     def preprocessImage(self, video, use_histo = False):
         video_frames_ppr = []
         
-        for frame in video:
+        for frame in video:         # rgb frame
             
             if use_histo:      
                 # first perform histogram equalization 
@@ -232,7 +214,7 @@ class Dataset(object):
                 
             else:
                 # transform to tensor and normalize the image to have mean = 0 and std = 1.
-                new_frame = transforms.ToTensor()(frame)                # this change the frame dimension: [colours, height, width]
+                new_frame = transforms.ToTensor()(frame)                # this change the frame dimension: [colours width, height]
                 
                 # Resize: downsampling or upsampling (bilinear interpolation)
                 new_frame = transforms.Resize((self.h,self.w), interpolation = InterpolationMode.BILINEAR, antialias= True)(new_frame)
@@ -257,7 +239,7 @@ class Dataset(object):
                     
                 # default normalization for values btw 0 and 1 already performed 
 
-            # back to the dimension: [height, width, colour]
+            # back to the dimension: [width, height, colour]
             # new_frame = new_frame.permute(1,2,0)  
             
             # includes all the frames in a list and then stack them
@@ -271,7 +253,7 @@ class Dataset(object):
         return label_v
     # ------------------------- data loading and managing
     
-    def save_video(self, frames, file_path): # frames dimensions [frame, height, width, colors]
+    def save_video(self, frames, file_path): # frames dimensions [frame, width, height, colors], colors rgb
         # print("frames.shape -> ",frames.shape)
         # print(file_path)
         
@@ -306,17 +288,9 @@ class Dataset(object):
             deeplake.load("hub://activeloop/daisee-test", verbose= True, access_method= "download")
             deeplake.load("hub://activeloop/daisee-validation", verbose= True, access_method= "download")
     
-    def saveCustomDataset(self,type_ds, version = "v1"):
+    def saveCustomDataset_v1(self, type_ds, name_path = "./data/customDAISEE_v1"):
         
-        name_path = "./data/customDAISEE_" + version
-        name_folder = "customDAISEE_" + version
-    
-        # prepare file system    
-        if not('EAI1' in os.getcwd()):
-            os.chdir('Documents/EAI1')
-        
-        if not(name_folder in os.listdir("./data/")):
-            os.makedirs(name_path)
+        print(f"Saving {type_ds} set of dataset v1...")
         
         # define the paths to saving folders
         path_save = os.path.join(name_path, type_ds)
@@ -336,11 +310,11 @@ class Dataset(object):
             
             # load locally the ds from deeplake
             if type_ds == 'train':
-                ds  = deeplake.load("hub://activeloop/daisee-train",        verbose= True,  access_method= "local")
+                ds  = deeplake.load("hub://activeloop/daisee-train",        verbose= False, access_method= "local")
             elif type_ds == "validation":
                 ds = deeplake.load("hub://activeloop/daisee-validation",    verbose= False, access_method= "local")
             elif type_ds == "test":
-                ds = deeplake.load("hub://activeloop/daisee-test",          verbose= True,  access_method= "local")
+                ds = deeplake.load("hub://activeloop/daisee-test",          verbose= False, access_method= "local")
             else:
                 raise ValueError("Invalid type for the dataset!")
                 return 
@@ -351,13 +325,14 @@ class Dataset(object):
             
             for idx in tqdm(range(n_samples)):
                 # take current x and y
-                x_data = xs[idx].data()    # dim: frame, height, width, colours 
+                x_data = xs[idx].data()
                 y_data = ys[idx].data()
                 
                 # get frames and do image enhancing
-                frames_ = x_data['frames']
-                frames = self.preprocessImage(frames_, use_histo= False)
-                frames = frames.to(T.float32)   # i can change to T.float16 here
+                frames_ = x_data['frames']      # (300, 480, 640, 3)
+                
+                frames = self.preprocessImage(frames_, use_histo= False)    # this move the color channel, now: [frames, color, width, height]
+                frames = frames.to(T.float32)                               # torch.Size([300, 3, 480, 640]), I can change to T.float16 here
                 del frames_; gc.collect()
                 
                 # get timestamps of video's frames
@@ -403,7 +378,7 @@ class Dataset(object):
                 path_json   = os.path.join(path_save_y, "sample_"+ str(idx)+ ".json")
                 
                 # save x
-                frames = frames.permute(0,2,3,1).numpy()
+                frames = frames.permute(0,2,3,1).numpy()    # (300, 480, 640, 3)
                 self.save_video(frames, path_video)
                 
                 # save y
@@ -412,8 +387,13 @@ class Dataset(object):
             
         else:
             return
+          
+    def saveCustomDataset_v2(self, type_ds, name_path = "./data/customDAISEE_v2"):
+        # TODO
+        pass
+    
          
-    def load_dataset_offline(self, workers = 1): #workers = 4):
+    def load_dataset_offline(self, workers = 0):
         """
             load the dataset:
             1) downloading first all the data if not locally present
@@ -421,34 +401,57 @@ class Dataset(object):
             3) create the pytorch Dataset object upon the new data
             4) create the dataloader for training, validation and testing
         """
-        try:
+        
+        # prepare file system pointer  
+        if not('EAI1' in os.getcwd()):
+            os.chdir('Documents/EAI1')
+        
+        path_v1 = "./data/customDAISEE_v1"
+        path_v2 = "./data/customDAISEE_v2"
+        
+        if not(os.path.exists(path_v1)):
+            os.makedirs(path_v1)
             self.export_env_variable()
             
-            # self.saveCustomDataset("train")
-            # custom_ds_train= CustomDaisee(ds_train)                                                                           # custom class for daisee dataset
-            # train_dataloader = DataLoader(custom_ds_train, batch_size= self.batch_size, num_workers= workers, shuffle= True)
-            
-            self.saveCustomDataset("validation")                                                                                # save pre-processed dataset
-            # custom_ds_valid = CustomDaisee(ds_valid)
-            # valid_dataloader = DataLoader(custom_ds_valid, batch_size= self.batch_size, num_workers= workers, shuffle= False)
-            
-            # self.saveCustomDataset("test")
-            # custom_ds_test = CustomDaisee(ds_test)
-            # test_dataloader = DataLoader(custom_ds_test, batch_size= self.batch_size, num_workers= workers, shuffle= False)
-            
-        except Exception as e:
-            print(e)
-            print("No data found locally, starting the download...")
-            
-            # TODO include this section
-            # self.download_dataset()
-            
-            # return self.load_dataset_offline(workers)
-            
-        # self.train_dataloader = train_dataloader
-        # self.valid_dataloader = valid_dataloader
-        # self.test_dataloader  = test_dataloader
+            try:
+                self.saveCustomDataset_v1("train",      name_path= path_v1)
+                self.saveCustomDataset_v1("validation", name_path= path_v1)
+                self.saveCustomDataset_v1("test",       name_path= path_v1)
+
+            except Exception as e:
+                print(e)
+                print("fdfd")
+
+                # if not local data from deeplake, download it     
+                if not( (os.path.exists("./EAI1/data/hub_activeloop_daisee-test")) and
+                        (os.path.exists("./EAI1/data/hub_activeloop_daisee-train")) and 
+                        (os.path.exists("./EAI1/data/hub_activeloop_daisee-validation")) ):
+                    print("No data found locally, starting the download...")
+                
+                    # self.download_dataset()
+                    
+                    # retry after the download
+                    # return self.load_dataset_offline(workers)
         
+        # add elif case for v2
+        
+        
+        # create pytorch datasets and get the dataloaders
+        
+        custom_ds_train= CustomDaisee(type_ds="train", version="v1")
+        train_dataloader = DataLoader(custom_ds_train, batch_size= self.batch_size, num_workers= workers, shuffle= True)   
+        
+        custom_ds_valid= CustomDaisee(type_ds="validation", version="v1")  
+        valid_dataloader = DataLoader(custom_ds_valid, batch_size= self.batch_size, num_workers= workers, shuffle= False)
+        
+        custom_ds_test= CustomDaisee(type_ds="test", version="v1") 
+        test_dataloader = DataLoader(custom_ds_test, batch_size= self.batch_size, num_workers= workers, shuffle= False)
+           
+        # set the dataloaders
+        
+        self.train_dataloader = train_dataloader
+        self.valid_dataloader = valid_dataloader
+        self.test_dataloader  = test_dataloader
         return 
     
     def load_dataset_online(self, batch_size = 1, workers = 0):
@@ -571,22 +574,23 @@ class Dataset(object):
           
 # -------------------------------------------------------------- testing
 def test_fetch_speed(dataloader = None):
+
     if dataloader is None:
         # default deeplake dataset object to pytorch dataloader
         os.environ["DEEPLAKE_DOWNLOAD_PATH"] = "/home/faber/Documents/EAI1/data"
         ds_valid = deeplake.load("hub://activeloop/daisee-validation", verbose= False, access_method= "local")
         dataloader = ds_valid.pytorch()
     start = time()
-    for i,x in enumerate(dataloader):
-        print(i)
-        
+    n_sample = 50
+    for i,x in tqdm(enumerate(dataloader), total= n_sample):
+        if i == 50: break
         
     t_time = time() - start
-    print(t_time)
+    print("\nTime elapsed {}".format(t_time))
 
 
 
-dataset = Dataset()
+# dataset = Dataset(batch_size=2)
 # dataloader = dataset.get_validationSet()
 # dataset.print_loaderCustomDaisee(dataset.get_validationSet)
 # test_fetch_speed(dataloader)

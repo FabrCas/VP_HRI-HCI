@@ -3,7 +3,7 @@ import os
 import random
 import warnings
 import gc
-# import itertools
+
 from datetime import date
 from tqdm import tqdm
 random.seed(22)
@@ -23,7 +23,7 @@ from dataset import Dataset
 
 class EngagementClassifier(nn.Module):
     # class constructor
-    def __init__(self, args = None, load = False, video_resnet = True, depth_level = 0):
+    def __init__(self, args = None, load = False, video_resnet = True, depth_level = 0, batch_size = 1):
         """
         @param args: list of arguments from main module 
         @param depth_level: int value to choose depth of the network
@@ -35,11 +35,11 @@ class EngagementClassifier(nn.Module):
         # superclass call and parameters setting
         super().__init__()
         self.args = args
-        
+        self.batch_size = batch_size
         
         # set Dataset and device
         self.device = T.device("cuda:0" if T.cuda.is_available() else "cpu")
-        self.dataset: Dataset = Dataset(batch_size = 1)
+        self.dataset: Dataset = Dataset(batch_size = self.batch_size)
 
         # build and load the model to GPU
         if video_resnet:
@@ -49,6 +49,8 @@ class EngagementClassifier(nn.Module):
         self.model.to(self.device)
         if not(load):
             self.init_weights_normal()
+        else: 
+            pass
         
         # define learning functions
         """ 
@@ -81,11 +83,13 @@ class EngagementClassifier(nn.Module):
     # ---------------- [data processing functions]
     
     def sample_frames(self, x, n_frames = 30, verbose = False):  # 30 frames corresponds to 1[s] of video
-        # sample the frames taking a random number from 0 to (total_frames - n_frames) and include the next n_frames.
+        # avoid last frame, sometimes complete black frame
+        # sample the frames taking a random number from 0 to ((total_frames -1) - n_frames) and include the next n_frames.
         
-        #TODO pass to a 15 fps sampling (take a sample and skip the next one)
+        #TODO pass to a 15 fps sampling (take a sample and skip the next one), in this case 2 seconds of recording are taken
+        # probably it's better to use directlu in the dataset class
         
-        total_frames = x.shape[1]
+        total_frames = (x.shape[1] -1)
         start_frame_index = random.randint(0,(total_frames - n_frames))
         end_frame_index = start_frame_index + n_frames
         if verbose: print(f"start: {start_frame_index}, end:{end_frame_index}")
@@ -115,8 +119,6 @@ class EngagementClassifier(nn.Module):
         # get number of steps for epoch and current date in format "DD-MM-YYYY"
         n_steps = len(dataloader)
         date_ = date.today().strftime("%d-%m-%Y")
-        print(date_)
-        print(type(date_))
         print("number of steps per epoch: {}".format(n_steps))
         
         self.model.train()
@@ -142,14 +144,13 @@ class EngagementClassifier(nn.Module):
                 # cumulative loss for print
                 tmp_loss = 0
                 
-                for step_index, (frames, label, timestamps, label_description) in tqdm(enumerate(dataloader), total=len(dataloader)):
+                for step_index, (frames, label) in tqdm(enumerate(dataloader), total=len(dataloader)):
                     
                     # 1) get x and y data
-                    
                     x = self.sample_frames(frames)
                     # TODO extract face
                     del frames; gc.collect()
-                    # expect input for the network: (batch_size, color_size, frames_len, height, width), so swap axis 2 and axis 1
+                    # expect input for the network: (batch_size, color_size, frames_len, width, height), so swap axis 2 and axis 1
                     x = x.permute(0,2,1,3,4).to(self.device)  
                     x.requires_grad_()
                     
@@ -171,8 +172,8 @@ class EngagementClassifier(nn.Module):
                         loss = self.loss_f(logits, y, reduction= 'sum')
                         if verbose: print("loss ->", loss, type(loss))
                         
-                        probs  = self.output_af(logits, dim = 1)    # no used here, but needed for the full forward
-                        if verbose: print("probabilities ->", probs,  type(probs), probs.shape)
+                        # probs  = self.output_af(logits, dim = 1)    # no used here, but needed for the full forward
+                        # if verbose: print("probabilities ->", probs,  type(probs), probs.shape)
                     
                     loss_epoch += loss.item()         
                     tmp_loss += loss.item()
@@ -279,8 +280,12 @@ def test_forward_3D():
     # classifier.printSummaryNetwork(inputShape= rand_input.shape)
     x = classifier.model.forward(rand_input_batch)
     
+def test_training():
+    classifier = EngagementClassifier(batch_size= 1)
+    classifier.n_epochs = 1
+    classifier.train(name_model= "test_valid_set", save_model= True, verbose= False)
+    
 # test_forward_2D()
 # test_forward_3D()
+test_training()
 
-classifier = EngagementClassifier()
-classifier.train(name_model= "test_valid_set", save_model= True, verbose= False)
