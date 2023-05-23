@@ -582,7 +582,7 @@ class Dataset(object):
             break
         
           
-# -------------------------------------------------------------- testing
+# --------------------------------------------------------------------------- testing dataset
 def test_fetch_speed(dataloader = None):
 
     if dataloader is None:
