@@ -50,23 +50,15 @@ class CustomDaisee(Dataset):
         self.list_gts    =  sorted(os.listdir(self.path_dataset_labels),    key = get_id_labels)
         self.list_videos =  sorted(os.listdir(self.path_dataset_video),     key = get_id_video)
         
-        # self.transform = transforms.Compose([
-        #         # i can convert to grayscale here
-        #         transforms.ToTensor(),
-        #         transforms.Resize((self.h,self.w), interpolation= InterpolationMode.BILINEAR, antialias= True),
-        #         # RandAugment(),
-        #         # transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))   # values between -1 and 1 
-        #         transforms.Normalize((0,0,0), (1,1,1))                     # values between 0 and 1
-        #     ])
-        
-        self.random_augment = transforms.RandAugment()
+        # self.random_augment = transforms.RandAugment()
         self.toTensor = transforms.ToTensor()
+        self.colorJitter = transforms.ColorJitter(brightness=0.1, contrast=0.2, saturation=0.3, hue=0.1)
       
     def check_args(self, version, type_ds):
         if (type_ds not in ['train', 'test', 'validation']) or (version not in ["v1", "v2"]):
             raise ValueError("Not valid arguments for the class {}".format(self.__class__.__name__))
         
-    def readVideo(self, path, read_RGB = False):
+    def readVideo(self, path, augment_color = False, read_RGB = False):
         """
             read a video from name file using the relative path of the dataset type
         """
@@ -98,10 +90,14 @@ class CustomDaisee(Dataset):
                 if read_RGB:
                     frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 
-                # TODO if training add randargument
+                # random augmentation uses 8bit int representation, values from 0 to 255
+                # frame = self.random_augment(T.tensor(frame))
                 
                 # convert image to a tensor with values between 0 and 1, and colors channel moved: from (w,h,c) -> (c,w,h)
                 frame = self.toTensor(frame)    # torch.Size([3, 480, 640])
+                
+                # dataugmentation altering colors
+                if augment_color: frame = self.colorJitter(frame)
                 
                 # fill the list of frames
                 frames.append(frame)
@@ -399,7 +395,11 @@ class Dataset(object):
             return
           
     def saveCustomDataset_v2(self, type_ds, name_path = "./data/customDAISEE_v2"):
-        # TODO dataset v2
+        # TODO dataset v2, face extraction + HOG? 
+        pass
+    
+    def saveCustomDataset_v3(self, type_ds, name_path = "./data/customDAISEE_v2"):
+        # TODO dataset v2 in grayscale
         pass
     
          
@@ -600,8 +600,8 @@ def test_fetch_speed(dataloader = None):
 
 
 
-# dataset = Dataset(batch_size=2)
-# dataloader = dataset.get_validationSet()
+dataset = Dataset(batch_size=1)
+dataloader = dataset.get_validationSet()
 # dataset.print_loaderCustomDaisee(dataset.get_validationSet)
-# test_fetch_speed(dataloader)
+test_fetch_speed(dataloader)
 
