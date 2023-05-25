@@ -1,0 +1,1 @@
+from featuresExtractors import CNN_faceExtractor
