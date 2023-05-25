@@ -116,8 +116,8 @@ class CNN_faceExtractor(object):
         if cv2.cuda.getCudaEnabledDeviceCount() > 0:
             self.model.setPreferableBackend(cv2.dnn.DNN_BACKEND_CUDA)
             self.model.setPreferableTarget(cv2.dnn.DNN_TARGET_CUDA)
-        else:
-            print("Not found GPU")
+        # else:
+        #     print("Not found GPU")
 
     def download_model_files(self):
         # prepare file system pointer  
@@ -171,12 +171,13 @@ class CNN_faceExtractor(object):
         
         if not (return_most_confident):
             for i in range(0, detections.shape[2]):
+                
                 confidence = detections[0, 0, i, 2]
                 if confidence > confidence_threshold:
                     box = detections[0, 0, i, 3:7] * np.array([w, h, w, h])  
                     box = box.astype(int)  # numpy array [top-left_x, top-left_y, bottom-right_x, bottom-right_y]
                     boxes.append(box)
-            return [self.getImageFromBox(box, img) for box in boxes]
+            return boxes   # [self.getImageFromBox(box, img) for box in boxes], 
         
         else:
             # for i in range(0, detections.shape[2]):
@@ -191,7 +192,7 @@ class CNN_faceExtractor(object):
             if max_confidence[0] > confidence_threshold:
                 box = detections[0, 0, max_confidence[1], 3:7] * np.array([w, h, w, h])   # numpy array [top-left_x, top-left_y, bottom-right_x, bottom-right_y,]
                 box = box.astype(int)
-                return self.getImageFromBox(box, img)
+                return box   # self.getImageFromBox(box, img), 
             
     def drawFaces(self, img, confidence_threshold = 0.3, color = (0, 255,0), thickness = 2):
         # save original dimension
@@ -367,6 +368,6 @@ def test_getFaces(face_extractor):
 # eye_extractor = Haar_eyesDectector(verbose =  True)
 # test_extractors(face_extractor, eye_extractor)
 
-face_extractor = CNN_faceExtractor(verbose = True)
+# face_extractor = CNN_faceExtractor(verbose = True)
 # test_extractors(face_extractor)
 # test_getFaces(face_extractor)

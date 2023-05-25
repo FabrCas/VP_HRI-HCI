@@ -124,7 +124,7 @@ class EngagementClassifier(nn.Module):
         
         print("Computing the weights for the training set")
         # get train dataset using single mini-batch size
-        laoder = self.dataset.get_dataloaderLabelsTrain()
+        laoder = self.dataset.get_dataloaderLabels(type_ds= "train")
         
         # compute occurrences of labels
         class_freq={}
@@ -546,4 +546,4 @@ def test_sampler():
 # test_compute_weights()
 # test_forward()
 # test_testing()
-test_sampler()
+# test_sampler()

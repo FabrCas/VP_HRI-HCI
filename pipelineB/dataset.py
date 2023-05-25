@@ -2,6 +2,7 @@
 from time import time
 import multiprocessing as mp
 import os
+import math
 from tqdm import tqdm
 import gc
 import cv2
@@ -192,8 +193,8 @@ class Dataset(object):
     def get_testSet(self):
         return self.test_dataloader
 
-    def get_dataloaderLabelsTrain(self):
-        custom_ds_train= CustomDaisee(type_ds="train", version="v1", just_label = True)
+    def get_dataloaderLabels(self, type_ds, version = "v1"):
+        custom_ds_train= CustomDaisee(type_ds = type_ds, version= version, just_label = True)
         dataloader_labelsTrain = DataLoader(custom_ds_train, batch_size= 1, num_workers= 0, shuffle= False)
         return dataloader_labelsTrain
         
@@ -267,7 +268,87 @@ class Dataset(object):
         label_v = np.zeros((1,4), dtype= np.int32)
         label_v[:,label[0]] = 1
         return label_v
+    
+    # used to make the dataset more balanced in v2
+    def balanceLabels(self, type_ds, verbose = False):
+        laoder = self.get_dataloaderLabels(type_ds = type_ds)
+
+        # compute occurrences of labels
+        class_freq={}
+        labels = []
+        
+        total = len(laoder)
+        for y  in tqdm(laoder, total= total):
+            l = y.item()
+            if l not in class_freq.keys():
+                class_freq[l] = 1
+            else:
+                class_freq[l] = class_freq[l]+1
+            labels.append(l)
+        
+        n_labels = len(labels)   
+        # sorting the dictionary by key
+        class_freq = {k: class_freq[k] for k in sorted(class_freq.keys())}
+        
+        if verbose: print("class frequency: ->", class_freq)
+        
+        min_freq = min(class_freq.items(), key= lambda x: x[1])
+        if verbose: print("minimum frequency ->", min_freq)
+        
+        max_freq = max(class_freq.items(), key= lambda x: x[1])
+        if verbose: print("maximum frequency ->", max_freq)
+        
+        # indices for each label
+        indices_0 = [idx for idx, val in enumerate(labels) if val == 0]
+        indices_1 = [idx for idx, val in enumerate(labels) if val == 1]
+        indices_2 = [idx for idx, val in enumerate(labels) if val == 2]
+        indices_3 = [idx for idx, val in enumerate(labels) if val == 3]
+        
+        # complete list of indices
+        indices = {0:indices_0, 1:indices_1, 2:indices_2, 3:indices_3}
+        
+        if verbose: print("lenght indices:", len(indices_0), len(indices_1), len(indices_2), len(indices_3))
+
+        # dict of sampled indices
+        sampled_indices = {}
+        
+        for k,v in class_freq.items():
+            if k != min_freq[0]:
+                multiplier = ((n_labels - v)/(n_labels)) * 0.25
+                
+                
+                # 20% of the actual values + the number of minimum samples
+                n_sample = int(v*multiplier) # + min_freq[1]
+                if n_sample > v:
+                    n_sample = v
+                
+                if verbose: print(f"n_sample for {k} -> {n_sample}")
+                sampled_indices[k] = random.sample(indices[k], n_sample)
+            else:
+                if verbose: print(f"n_sample for {k} -> {v}")
+                
+                sampled_indices[k] = indices[k]
+            
+
+        # build the flat list with the sorted indices selected
+        final_list = []
+        for k,v in sampled_indices.items():
+            final_list = [*final_list, *v] 
+        
+        final_list = sorted(final_list)
+        
+        if verbose: print("number of samples after the reduction: ", len(final_list))
+
+        return class_freq, final_list
+    
     # ------------------------- data loading and managing
+    
+    def loadJson(self, path):
+        with open(path, "r") as file:
+            json_data = file.read()
+        data =  json.loads(json_data)
+        return data
+    
     
     def save_video(self, frames, file_path, w = None, h = None ): # frames dimensions [frame, width, height, colors], colors rgb
         # print("frames.shape -> ",frames.shape)
@@ -312,6 +393,13 @@ class Dataset(object):
             exit()
 
         show_ = show
+        
+        # variable to set the box dimensions
+        first_frame = True
+        width_box = None; height_box = None
+        prev_center = (None, None)
+        prev_cords = (None, None, None, None)
+        
         # Read and process each frame of the video
         while True:
             # Read a frame from the video
@@ -323,13 +411,60 @@ class Dataset(object):
             
             # sometimes last frame is None
             if frame is not None:
-                new_frame = extractor.getFaces(frame, return_most_confident=True)
-
+                box = extractor.getFaces(frame, return_most_confident=True) # returns numpy array [top-left_x, top-left_y, bottom-right_x, bottom-right_y,]
+            
+                if box is None: continue
                 
-                if new_frame is None: continue
+                # if first frame get width an height of the box
+                if first_frame:
+                    width_box = box[2] - box[0]
+                    height_box = box[3] - box[1]
+                    first_frame = False
+
+                # compute center of the actual box from the extractor
+                w = box[2] - box[0]
+                h = box[3] - box[1]
+                x_center  = int(box[0] + w/2)
+                y_center = int(box[1] + h/2)
+
+                # get the box using always the same width and height and the new center
+                topLeft_x_      = x_center - int(width_box/2)
+                topLeft_y_      = y_center - int(height_box/2)
+                bottomRight_x_   = x_center + int(width_box/2)
+                bottomRight_y_   = y_center + int(height_box/2)
+                
+                new_center_x = topLeft_x_ + int(width_box/2)
+                new_center_y = topLeft_y_ + int(height_box/2)
+                
+                # as defult use the new values of the vertices to build the image patch
+                topLeft_x     = topLeft_x_    
+                topLeft_y     = topLeft_y_    
+                bottomRight_x = bottomRight_x_
+                bottomRight_y = bottomRight_y_
+                
+                # check is can be used prev coordinates, this to avoid having a choppy video
+                if not(prev_center == (None, None)):
+                    norm = math.sqrt((new_center_x - prev_center[0])**2 + (new_center_y - prev_center[1])**2)
+                    if norm < 2.5:
+                        topLeft_x      = prev_cords[0]
+                        topLeft_y      = prev_cords[1]
+                        bottomRight_x  = prev_cords[2]
+                        bottomRight_y  = prev_cords[3]
+
+                # build the new frame 
+                new_frame  = frame[topLeft_y: bottomRight_y, topLeft_x: bottomRight_x, :]
+                
+                # store the actal center as prev, used to reduce the frames shaking
+                prev_center = (new_center_x, new_center_y)
+                # save the new cords as prev
+                prev_cords = (topLeft_x, topLeft_y, bottomRight_x, bottomRight_y)
                 
                 # resize the image, to be all the same
-                new_frame = cv2.resize(new_frame, (reshape_w, reshape_h), interpolation = cv2.INTER_LINEAR)
+                try:
+                    new_frame = cv2.resize(new_frame, (reshape_w, reshape_h), interpolation = cv2.INTER_LINEAR)
+                except:
+                    # to avoid problematic frames
+                    continue
                 
                 if show_:
                     plt.imshow(new_frame)
@@ -495,12 +630,18 @@ class Dataset(object):
                 
             if not(os.path.exists(path_save_y)):   
                 os.makedirs(path_save_y)
-
+            
+            # sampling indices to reduce dimensionality and balance dataset
+            _, sampled_index = self.balanceLabels(type_ds, verbose = True)
             
             print("Saving gt ...")
             # first copy the gt
-            for name in tqdm(sorted(os.listdir(os.path.join("./data/customDAISEE_v1", type_ds, "gt")), key = get_id_labels)):
+            list_gt_v1 = sorted(os.listdir(os.path.join("./data/customDAISEE_v1", type_ds, "gt")), key = get_id_labels)
+            
+            for idx, name in tqdm(enumerate(list_gt_v1), total= len(list_gt_v1)):
                 # print(name)
+                if not(idx in sampled_index): continue
+            
                 src = os.path.join("./data/customDAISEE_v1", type_ds, "gt", name)
                 dst = os.path.join(path_save_y, name)
                 shutil.copyfile(src, dst)
@@ -508,12 +649,15 @@ class Dataset(object):
             
             print("Saving video ...")
             # then extract face and create the new video
-            for name in tqdm(sorted(os.listdir(os.path.join("./data/customDAISEE_v1", type_ds, "video")), key = get_id_video)):
+            
+            list_video_v1 = sorted(os.listdir(os.path.join("./data/customDAISEE_v1", type_ds, "video")), key = get_id_video)
+            for idx, name in tqdm(enumerate(list_video_v1), total= len(list_video_v1)):
+                
+                if not(idx in sampled_index): continue
+                
                 old_video_path = os.path.join("./data/customDAISEE_v1", type_ds, "video", name)
                 new_video_path = os.path.join(path_save_x, name)
-                # print(old_video_path)
-                # print(new_video_path)
-                new_video, new_w, new_h = self.extract_face_video(face_extractor, old_video_path)
+                new_video, new_w, new_h = self.extract_face_video(face_extractor, old_video_path, show = False)
                 self.save_video(new_video, new_video_path, w= new_w, h= new_h)
         
         else: # already built
@@ -525,7 +669,7 @@ class Dataset(object):
         pass
     
         
-    def load_dataset_offline(self, workers = 0, version = "v1"):
+    def load_dataset_offline(self, workers = 0, version = "v2"):
         """
             load the dataset:
             1) downloading first all the data if not locally present
@@ -552,8 +696,6 @@ class Dataset(object):
 
             except Exception as e:
                 print(e)
-                print("fdfd")
-
                 # if not local data from deeplake, download it     
                 if not( (os.path.exists("./EAI1/data/hub_activeloop_daisee-test")) and
                         (os.path.exists("./EAI1/data/hub_activeloop_daisee-train")) and 
@@ -564,15 +706,16 @@ class Dataset(object):
                     
                     # retry after the download
                     # return self.load_dataset_offline(workers)
+                    
+        if version != "v1":
+            if not(os.path.exists(path_v2)):
+                os.makedirs(path_v2)
+                self.saveCustomDataset_v2("train",      name_path= path_v2)
+                self.saveCustomDataset_v2("validation", name_path= path_v2)
+                self.saveCustomDataset_v2("test",       name_path= path_v2)
         
-        # add elif case for v2
-        if not(os.path.exists(path_v2)):
-            os.makedirs(path_v2)
-            self.saveCustomDataset_v2("train",      name_path= path_v2)
-            self.saveCustomDataset_v2("validation", name_path= path_v2)
-            self.saveCustomDataset_v2("test",       name_path= path_v2)
-        
-        
+        if version != "v2":
+            pass
         # create pytorch datasets and get the dataloaders
         
         custom_ds_train= CustomDaisee(type_ds="train", version= version, grayscale= self.grayscale)
@@ -728,6 +871,9 @@ def test_fetch_speed(dataloader = None):
 
 
 dataset = Dataset(batch_size=1)
+# freq, distr = dataset.balanceLabels(type_ds="validation", verbose= True)
+# print(freq)
+# print(distr)
 
 # dataloader = dataset.get_validationSet()
 # dataset.print_loaderCustomDaisee(dataset.get_validationSet)
