@@ -9,12 +9,12 @@ from datetime       import date
 from tqdm           import tqdm
 random.seed(22)
 import matplotlib.pyplot as plt
-from matplotlib.cm import get_cmap
+from matplotlib import colormaps
 from matplotlib.colors import Normalize
 
 # classification metrics 
 from sklearn.metrics import precision_score, recall_score, f1_score,     \
-        confusion_matrix, hamming_loss, jaccard_score
+        confusion_matrix, hamming_loss, jaccard_score, accuracy_score
     
 # torch import
 import torch as T
@@ -46,7 +46,7 @@ class EngagementClassifier(nn.Module):
         self.batch_size = batch_size
         
         # set Dataset and device
-        self.batch_size = 1
+        self.batch_size = batch_size
         self.version_dataset = version_dataset
         self.device = T.device("cuda:0" if T.cuda.is_available() else "cpu")
         self.dataset: Dataset = Dataset(batch_size = self.batch_size, version = version_dataset)
@@ -83,14 +83,18 @@ class EngagementClassifier(nn.Module):
          softmax produces a probability distribution over classes, while log softmax transforms
          the softmax probabilities into a logarithmic scale for numerical stability during 
         """
-        self.output_af  = F.softmax         # F.log_softmax
-        self.loss_f     = F.cross_entropy   #nn.CrossEntropyLoss
+        self.output_af  = F.softmax             # F.log_softmax
+        self.loss_f     = F.cross_entropy       # nn.CrossEntropyLoss
         
         # learning parameters
         self.lr = 1e-4
-        self.n_epochs = 1 # 5
-
-    
+        self.n_epochs = 10
+        self.weight_decay = 0.001   # L2 regularization term 
+        self.patience = 3           # patience for earling stopping 
+        
+        #TODO grid search for the parameters
+        
+        
     # ---------------- [initialization functions]
     
     def init_weights_normal(self):
@@ -102,7 +106,7 @@ class EngagementClassifier(nn.Module):
                 
     def init_weights_kaimingNormal(self):
         # Initialize the weights  using He initialization
-        print("Initializing weights using He initialization")
+        print("Weights initialization using kaiming Normal")
         for param in self.model.parameters():
             if len(param.shape) > 1:
                 nn.init.kaiming_normal_(param, mode='fan_out', nonlinearity='relu')
@@ -140,22 +144,22 @@ class EngagementClassifier(nn.Module):
             if verbose: print(f"sampled {round((scaler*n_frames)/30, 4)}[s] of video")
             return x_sampled
     
-    def compute_class_weights(self):
+    def compute_class_weights(self, verbose = False):
         
-        print("Computing the weights for the training set")
+        print("Computing class weights for the training set")
         # get train dataset using single mini-batch size
         laoder = self.dataset.get_dataloaderLabels(type_ds= "train", version= self.version_dataset)
         
         # compute occurrences of labels
         class_freq={}
         total = len(laoder)
-        for y  in tqdm(laoder, total= total):
+        for y in laoder:
             l = y.item()
             if l not in class_freq.keys():
                 class_freq[l] = 1
             else:
                 class_freq[l] = class_freq[l]+1
-        print("class_freq -> ", class_freq)
+        if verbose: print("class_freq -> ", class_freq)
         
         # compute the weights   
         class_weights = []
@@ -163,9 +167,8 @@ class EngagementClassifier(nn.Module):
             freq = class_freq[class_]
             class_weights.append(total/freq)
 
-        print("class_weights-> ", class_weights)
+        if verbose: print("class_weights-> ", class_weights)
         return class_weights
-    
     
     def focal_loss(self, y_pred, y_true, alpha=None, gamma=2, reduction='sum'):
         """
@@ -176,16 +179,17 @@ class EngagementClassifier(nn.Module):
             gamma -> parameter controls the rate at which the focal term decreases with increasing predicted probability
             reduction -> choose between sum or mean to reduce over results in a batch
         """
-        
+
         ce_loss = F.cross_entropy(y_pred, y_true, reduction='none')
         pt = T.exp(-ce_loss)
-        focal_loss = (1 - pt) ** gamma * ce_loss
-        
+
         if alpha is not None:
             # Apply class-specific alpha weights
             alpha = alpha.to(y_pred.device)
-            focal_loss = alpha * focal_loss
-
+            focal_loss = alpha[y_true] * (1 - pt) ** gamma * ce_loss
+        else:
+            focal_loss = (1 - pt) ** gamma * ce_loss
+            
         if reduction == 'mean':
             focal_loss = focal_loss.mean()
         elif reduction == 'sum':
@@ -193,12 +197,58 @@ class EngagementClassifier(nn.Module):
 
         return focal_loss
     
-    # ---------------- [Train & Test functions]
+    # ---------------- [Train, Validation &  Test functions]
+
+    def valid(self, loader, epoch,):
+        """
+            validation that compute the accuracy of the model in the current epoch
+        """
+        
+        print (f"Validation for the epoch: {epoch} ...")
+        # define array for validation loss story and prediction counters to compute the accuracy
+        # losses = []
+        correct_predictions = 0
+        num_predictions = 0 
+        
+        
+        for (frames, label) in tqdm(loader):
+            
+            # 1) get x and y data
+            x = self.sample_frames(frames, n_frames= 60); del frames; gc.collect()
+            x = x.permute(0,2,1,3,4).to(self.device)  
+            y = label.to(self.device)
+            
+            with T.no_grad():
+                with autocast():
+                    logits  = self.model.forward(x)
+                    
+                    probs   = self.output_af(logits, dim = -1) 
+                    y_pred  = T.argmax(probs, dim= -1).cpu().numpy().astype(int)
+                
+                    # loss    = self.focal_loss(y_pred = logits, y_true = y, alpha=self.class_weights ,reduction= 'sum')
+        
+            y = y.cpu().numpy()  
+            # losses.append(loss.item())
+            
+            correct_predictions += (y_pred == y).sum()
+            num_predictions += y_pred.shape[0]
+            
+                
+        # mean_loss = sum(losses)/len(losses)
+        accuracy = correct_predictions / num_predictions
+        
+        # return mean_loss, accuracy
+        return accuracy
+        
 
     def train(self, name_model = "test", save_model = False, verbose = True):
-        train_dataloader = self.dataset.get_trainSet()
         
-        # get number of steps for epoch and current date in format "DD-MM-YYYY"
+        # get the train and validation dataloaders
+        train_dataloader = self.dataset.get_trainSet()
+        valid_dataloader = self.dataset.get_validationSet()
+        
+        
+        # get number of steps for epoch and current date in format "DD-MM-YYYY" for the folder name
         n_steps = len(train_dataloader)
         date_ = date.today().strftime("%d-%m-%Y")
         print("number of steps per epoch: {}".format(n_steps))
@@ -207,15 +257,22 @@ class EngagementClassifier(nn.Module):
         self.model.train()
         
         # define optimizer, scheduler & scaler
-        optimizer = Adam(self.model.parameters(), lr = self.lr, weight_decay= 0)
+        optimizer = Adam(self.model.parameters(), lr = self.lr, weight_decay =  self.weight_decay,)
         scheduler = lr_scheduler.OneCycleLR(optimizer, max_lr=self.lr, steps_per_epoch=n_steps, epochs=self.n_epochs, pct_start=0.3)
         scaler = GradScaler()
         
         # initialize list to store the losses of each epoch
         loss_epochs = []
         
+        # initialize list to store the losses from the validation
+        valid_history = []
+        
+        # intialize to zero the counter for early stopping using patience
+        patience_counter = 0
+        
         # frequency used to save the model every "freq_save" epochs
         freq_save = 5
+        
         # frequency used to rint and show loss every "loss_steps_freq" steps
         loss_steps_freq = 50
         
@@ -227,6 +284,9 @@ class EngagementClassifier(nn.Module):
             
             
             for epoch_index in range(self.n_epochs) :
+                
+                print(f"             [Epoch{epoch_index+1}]             \n")
+                
                 # cumulative loss for the current epoch
                 loss_epoch = 0
                 
@@ -240,8 +300,6 @@ class EngagementClassifier(nn.Module):
                 saved = False
                 
                 for step_index, (frames, label) in tqdm(enumerate(train_dataloader), total=len(train_dataloader)):
-                    
-                    # if step_index <= 600: continue
                     
                     # 1) get x and y data
                     x = self.sample_frames(frames, n_frames= 60)
@@ -279,11 +337,13 @@ class EngagementClassifier(nn.Module):
                     
                     # backpropagation
                     scaler.scale(loss).backward()
+                    
                     # clip gradients
                     T.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
 
                     # compute updates on weights
                     scaler.step(optimizer)
+                    
                     # update scaler
                     scaler.update()
                     
@@ -313,6 +373,24 @@ class EngagementClassifier(nn.Module):
                     name_folder = os.path.join("./models",name_model+ "_" + date_)
                     name_ckpt =  str(epoch_index+1)
                     self._saveModel(name_ckpt, path_folder= name_folder)
+                    
+                # Data validation
+                acc = self.valid(valid_dataloader, epoch = epoch_index+1)
+                print(f"Accuracy from validation: {acc}")
+                valid_history.append(acc)
+                
+                # Early stopping
+                if epoch_index > 0:
+                    if valid_history[-1] < valid_history[-2]:
+                        if patience_counter >= self.patience:
+                            print("Early stop")
+                            break
+                        else:
+                            print("Pantience counter increased")
+                            patience_counter += 1
+                    else:
+                        print("Accuracy increased respect previous epoch")
+                
 
             # save last epoch if not already saved
             if not(saved):
@@ -504,7 +582,7 @@ class EngagementClassifier(nn.Module):
         # plt.scatter(x_values, loss_array, c=colors, cmap='cool')
         
         # Create a colormap
-        cmap = get_cmap('Reds')        
+        cmap = colormaps.get_cmap('Reds')    
         norm = Normalize(vmin= min(loss_array), vmax= max(loss_array))
     
         # Plot the array with a continuous line color
@@ -565,11 +643,11 @@ class EngagementClassifier(nn.Module):
             if verbose: print("logits shape ->",logits.shape) 
             
             # compute probabilities
-            probs  = self.output_af(logits, dim = 1)
+            probs  = self.output_af(logits, dim = -1)               # -1, so on the last axis
             if verbose: print("probs shape ->",probs.shape)
             
             # get the class with max probability 
-            y_pred = T.argmax(probs, dim= 1).cpu().detach().numpy().astype(int)
+            y_pred = T.argmax(probs, dim= -1).cpu().detach().numpy().astype(int)
             if verbose: print("y_pred shape ->",y_pred.shape)
 
         
@@ -604,16 +682,23 @@ def test_forward_3DNet():
     classifier.printSummaryNetwork(inputShape= rand_input.shape)
     
 def test_training():
-    classifier = EngagementClassifier(batch_size= 1, version_dataset= 'v2', grayscale= False)
+    # TODO problem of focal loss when batch size is more than  one
+    classifier = EngagementClassifier(batch_size= 2, version_dataset= 'v2', grayscale= False)
     classifier.n_epochs = 2
     classifier.train(name_model= "test_1", save_model= True, verbose= False)
     
+def test_validation():
+    classifier = EngagementClassifier(batch_size= 2, version_dataset= 'v2', grayscale= False)
+    classifier.loadModel(epoch = 1, path_folder="./models/test_valid_set_23-05-2023")
+    avg_accuracy = classifier.valid(classifier.dataset.get_validationSet(), epoch=0)
+    print(avg_accuracy)
     
 def test_forward():
     classifier = EngagementClassifier()
     classifier.loadModel(epoch = 1, path_folder="./models/test_valid_set_23-05-2023")
     x = np.random.rand(2,3,30,480,640)
-    classifier.forward(x, verbose = True)
+    y_pred = classifier.forward(x, verbose = True)
+    print(y_pred, y_pred.shape)
 
 def test_testing():
     classifier = EngagementClassifier()
@@ -632,12 +717,23 @@ def test_loss_plotting():
     loss = [2,10,40,100,25,13,6,3,2,1]
     classifier.plot_loss(loss, 30, duration_timer= None)
 
+# ----------------------------------------------------------------------------------------training functions 
+def train_1():
+    classifier = EngagementClassifier(batch_size= 4, version_dataset= 'v2', grayscale= False)
+    classifier.train(name_model= "train_v2_batch4_color_depth0", save_model= True, verbose= False)
+    
+
 # classifier = EngagementClassifier(batch_size= 1, version_dataset= 'v2')
 
-# test_loss_plotting()
 # test_forward_2DNet()
 # test_forward_3DNet()
-test_training()
+# test_training()
+# test_validation()
 # test_forward()
 # test_testing()
 # test_sampler()
+# test_loss_plotting()
+
+
+
+
