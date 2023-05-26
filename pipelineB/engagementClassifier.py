@@ -9,10 +9,12 @@ from datetime       import date
 from tqdm           import tqdm
 random.seed(22)
 import matplotlib.pyplot as plt
+from matplotlib.cm import get_cmap
+from matplotlib.colors import Normalize
 
 # classification metrics 
 from sklearn.metrics import precision_score, recall_score, f1_score,     \
-    average_precision_score, confusion_matrix, hamming_loss, jaccard_score
+        confusion_matrix, hamming_loss, jaccard_score
     
 # torch import
 import torch as T
@@ -29,7 +31,7 @@ from dataset import Dataset
 
 class EngagementClassifier(nn.Module):
     # class constructor
-    def __init__(self, args = None, load = False, video_resnet = True, depth_level = 0, batch_size = 1):
+    def __init__(self, args = None, version_dataset= "v2", video_resnet = True, grayscale = False, depth_level = 0, batch_size = 1):
         """
         @param args: list of arguments from main module 
         @param depth_level: int value to choose depth of the network
@@ -44,19 +46,37 @@ class EngagementClassifier(nn.Module):
         self.batch_size = batch_size
         
         # set Dataset and device
+        self.batch_size = 1
+        self.version_dataset = version_dataset
         self.device = T.device("cuda:0" if T.cuda.is_available() else "cpu")
-        self.dataset: Dataset = Dataset(batch_size = self.batch_size)
-
+        self.dataset: Dataset = Dataset(batch_size = self.batch_size, version = version_dataset)
+        
+        # Boolean flags for the model
+        self.video_resnet = video_resnet
+        self.grayscale = grayscale
+    
         # build and load the model to GPU
+        self.depth_level = depth_level
         if video_resnet:
-            self.model: ResNet2D = ResNet3D(depth_level = depth_level)
+            # use model for video clips
+            if self.grayscale:
+                self.model: ResNet3D = ResNet3D(depth_level = depth_level, n_channels = 1)
+            else:
+                self.model: ResNet3D = ResNet3D(depth_level = depth_level, n_channels = 3)
         else:
-            self.model: ResNet2D = ResNet2D(depth_level = depth_level)
+            # use model for single frames
+            if self.grayscale:
+                self.model: ResNet2D = ResNet2D(depth_level = depth_level, n_channels =1)
+            else:
+                self.model: ResNet2D = ResNet2D(depth_level = depth_level, n_channels = 3)
+            
         self.model.to(self.device)
-        if not(load):
-            self.init_weights_normal()
-        else: 
-            pass
+        self.init_weights_kaimingNormal()
+        self.class_weights = T.tensor(self.compute_class_weights()).to(self.device)
+        
+        # self.learning_weights = [161.235, 25.617, 2.069, 2.121]   # weights for v1
+        # self.learning_weights = [22.588, 15.059, 2.246, 2.252]    # weights for v2
+        
         
         # define learning functions
         """ 
@@ -69,7 +89,7 @@ class EngagementClassifier(nn.Module):
         # learning parameters
         self.lr = 1e-4
         self.n_epochs = 1 # 5
-        self.learning_weights = [161.235, 25.617, 2.069, 2.121]   # weights from self.compute_class_weights(), no needed to recompute
+
     
     # ---------------- [initialization functions]
     
@@ -124,7 +144,7 @@ class EngagementClassifier(nn.Module):
         
         print("Computing the weights for the training set")
         # get train dataset using single mini-batch size
-        laoder = self.dataset.get_dataloaderLabels(type_ds= "train")
+        laoder = self.dataset.get_dataloaderLabels(type_ds= "train", version= self.version_dataset)
         
         # compute occurrences of labels
         class_freq={}
@@ -146,8 +166,8 @@ class EngagementClassifier(nn.Module):
         print("class_weights-> ", class_weights)
         return class_weights
     
-    # TODO implement this shit
-    def focal_loss(y_pred, y_true, alpha=None, gamma=2, reduction='mean'):
+    
+    def focal_loss(self, y_pred, y_true, alpha=None, gamma=2, reduction='sum'):
         """
             focal loss implementation to handle to problem of unbalanced classes
             y_pred -> logits from the model
@@ -176,16 +196,17 @@ class EngagementClassifier(nn.Module):
     # ---------------- [Train & Test functions]
 
     def train(self, name_model = "test", save_model = False, verbose = True):
-        dataloader = self.dataset.get_trainSet()
+        train_dataloader = self.dataset.get_trainSet()
         
         # get number of steps for epoch and current date in format "DD-MM-YYYY"
-        n_steps = len(dataloader)
+        n_steps = len(train_dataloader)
         date_ = date.today().strftime("%d-%m-%Y")
         print("number of steps per epoch: {}".format(n_steps))
         
+        # set the mode
         self.model.train()
         
-        # define optimizer , scheduler and scaler
+        # define optimizer, scheduler & scaler
         optimizer = Adam(self.model.parameters(), lr = self.lr, weight_decay= 0)
         scheduler = lr_scheduler.OneCycleLR(optimizer, max_lr=self.lr, steps_per_epoch=n_steps, epochs=self.n_epochs, pct_start=0.3)
         scaler = GradScaler()
@@ -193,23 +214,37 @@ class EngagementClassifier(nn.Module):
         # initialize list to store the losses of each epoch
         loss_epochs = []
         
+        # frequency used to save the model every "freq_save" epochs
+        freq_save = 5
+        # frequency used to rint and show loss every "loss_steps_freq" steps
+        loss_steps_freq = 50
+        
         # boolean flag indicing if the corrent epoch model has been savec
         saved: bool = False
         
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", category=RuntimeWarning)
             
+            
             for epoch_index in range(self.n_epochs) :
+                # cumulative loss for the current epoch
                 loss_epoch = 0
-                saved = False
                 
-                # cumulative loss for print
+                # cumulative loss for print, reset every "loss_steps_freq" steps
                 tmp_loss = 0
                 
-                for step_index, (frames, label) in tqdm(enumerate(dataloader), total=len(dataloader)):
+                # list of losses, saved before resetting tmp_loss doing the average over "loss_steps_freq" steps
+                loss_steps = []
+                
+                # boolean flag to guarantee the saving of the model at final step
+                saved = False
+                
+                for step_index, (frames, label) in tqdm(enumerate(train_dataloader), total=len(train_dataloader)):
+                    
+                    # if step_index <= 600: continue
                     
                     # 1) get x and y data
-                    x = self.sample_frames(frames)
+                    x = self.sample_frames(frames, n_frames= 60)
                     del frames; gc.collect()
                     # expect input for the network: (batch_size, color_size, frames_len, width, height), so swap axis 2 and axis 1
                     x = x.permute(0,2,1,3,4).to(self.device)  
@@ -230,7 +265,9 @@ class EngagementClassifier(nn.Module):
                         logits  = self.model.forward(x)
                         if verbose: print("logits ->", logits,  type(logits), logits.shape)
                         
-                        loss = self.loss_f(logits, y, reduction= 'sum')
+                        # loss = self.loss_f(logits, y, reduction= 'sum', weight= self.class_weights)
+                        loss = self.focal_loss(y_pred = logits, y_true = y, alpha=self.class_weights ,reduction= 'sum')
+                        
                         if verbose: print("loss ->", loss, type(loss))
                         
                         # probs  = self.output_af(logits, dim = 1)    # no used here, but needed for the full forward
@@ -254,19 +291,24 @@ class EngagementClassifier(nn.Module):
                     scheduler.step()
                     
                     # print info every 50 steps 
-                    if step_index % 50 == 0:
-                        print('Epoch [{}/{}], Step [{}/{}], LR {:.1e}, Loss: {:.1f}'
-                                .format(epoch_index, self.n_epochs, str(step_index).zfill(3), str(n_steps-1).zfill(3),
+                    if ((step_index+1)%loss_steps_freq)== 0:
+                        
+                        print('Epoch [{}/{}], Step [{}/{}], LR {:.1e}, Loss: {:.3f}'
+                                .format(epoch_index+1, self.n_epochs, str(step_index+1).zfill(3), str(n_steps).zfill(3),
                                         scheduler.get_last_lr()[0], \
-                                        tmp_loss))
+                                        tmp_loss/loss_steps_freq))
+                        
+                        loss_steps.append(tmp_loss/loss_steps_freq)
                         tmp_loss = 0  # resetting the periodic loss for steps
                         
-                print(f"Cumulative loss for the epoch -> {loss_epoch}")
-                loss_epochs.append(loss_epoch)
-                loss_epoch = 0
+                
+                # print info and plot of loss for the current epoch  
+                self.plot_loss(loss_array= loss_steps, epoch= str(epoch_index +1), duration_timer = 3000)  
+                print(f"Avg loss for the epoch -> {loss_epoch/len(train_dataloader)}")
+                loss_epochs.append(loss_epoch/len(train_dataloader))
                 
                 # save model periodically
-                if (epoch_index+1)%5 == 0 and save_model:
+                if (epoch_index+1)% freq_save == 0 and save_model:
                     saved = True
                     name_folder = os.path.join("./models",name_model+ "_" + date_)
                     name_ckpt =  str(epoch_index+1)
@@ -277,6 +319,10 @@ class EngagementClassifier(nn.Module):
                 name_folder = os.path.join("./models",name_model+ "_" + date_)
                 name_ckpt =  str(self.n_epochs)
                 self._saveModel(name_ckpt, path_folder= name_folder)
+            
+            # print the plot with the avg loss over epochs
+            name_folder = os.path.join("./results",name_model+ "_" + date_)
+            self.plot_loss(loss_array= loss_epochs, epoch= str(self.n_epochs), path_save= name_folder ,duration_timer = 3000)
         
     
     def test(self, epoch_model, folder_model, verbose = True,):
@@ -334,9 +380,9 @@ class EngagementClassifier(nn.Module):
         # print(targets)
         # print(targets.dtype)
         
-        
-        self._computeMetrics(output = predictions, targets= targets, name_model = name_model, epoch = str(epoch_model), save_results= True)        
         # compute metrics
+        self._computeMetrics(output = predictions, targets= targets, name_model = name_model, epoch = str(epoch_model), save_results= True)        
+        
         
     # ---------------- [Save & Load functions]
      
@@ -438,10 +484,56 @@ class EngagementClassifier(nn.Module):
         timer.start()
         plt.show()
         
-    def plot_loss(self, loss_array, path_save, epoch, duration_timer = 1000):
-        #TODO plotting function for loss
-        pass
+    def plot_loss(self, loss_array, epoch, path_save = None, duration_timer = 1000):
+    
+        def close_event():
+            plt.close()
         
+        # check if the folder exists otherwise create it
+        if (path_save is not None) and (not os.path.exists(path_save)):
+            os.makedirs(path_save)
+        
+        plt.style.use('dark_background')
+        
+        # define x axis values
+        x_values = list(range(1,len(loss_array)+1))
+        
+        # Generate an array of colors based on the values
+        # colors = np.arange(len(loss_array))
+        # plt.plot(x_values, loss_array, color = "red",linewidth=2)
+        # plt.scatter(x_values, loss_array, c=colors, cmap='cool')
+        
+        # Create a colormap
+        cmap = get_cmap('Reds')        
+        norm = Normalize(vmin= min(loss_array), vmax= max(loss_array))
+    
+        # Plot the array with a continuous line color
+        for i in range(len(loss_array) -1):
+            plt.plot([x_values[i], x_values[i + 1]], [loss_array[i], loss_array[i + 1]], color=cmap(norm(loss_array[i])) , linewidth=2)
+
+        
+        # text on the plot
+        if path_save is None:       
+            plt.xlabel('steps', fontsize=18)
+        else:
+            plt.xlabel('epochs', fontsize=18)
+        plt.ylabel('Loss', fontsize=18)
+        
+        plt.title('Learning loss plot', fontsize=18)
+        
+        # save if you define the path
+        if path_save is not None:
+            plt.savefig(os.path.join(path_save, 'loss_'+ epoch +'.png'))
+        
+        fig = plt.gcf()
+        
+        if duration_timer is not None:
+            timer = fig.canvas.new_timer(interval=duration_timer)
+            timer.add_callback(close_event)
+            timer.start()
+        
+        plt.show()
+    
         
     # ---------------- [Model forward function]
     def forward(self, x, verbose = False):
@@ -512,13 +604,10 @@ def test_forward_3DNet():
     classifier.printSummaryNetwork(inputShape= rand_input.shape)
     
 def test_training():
-    classifier = EngagementClassifier(batch_size= 1)
-    classifier.n_epochs = 1
-    classifier.train(name_model= "test_valid_set", save_model= True, verbose= False)
+    classifier = EngagementClassifier(batch_size= 1, version_dataset= 'v2', grayscale= False)
+    classifier.n_epochs = 2
+    classifier.train(name_model= "test_1", save_model= True, verbose= False)
     
-def test_compute_weights():
-    classifier = EngagementClassifier(batch_size= 1)
-    classifier.compute_class_weights()
     
 def test_forward():
     classifier = EngagementClassifier()
@@ -537,13 +626,18 @@ def test_sampler():
     for i in range(10):
         x_ = classifier.sample_frames(x=x, n_frames = 30, fps_sampling= 30, verbose = True)
         print(x_.shape, "\n")
-    
+        
+def test_loss_plotting():
+    classifier = EngagementClassifier(batch_size= 1, version_dataset= 'v2')
+    loss = [2,10,40,100,25,13,6,3,2,1]
+    classifier.plot_loss(loss, 30, duration_timer= None)
 
+# classifier = EngagementClassifier(batch_size= 1, version_dataset= 'v2')
 
+# test_loss_plotting()
 # test_forward_2DNet()
 # test_forward_3DNet()
-# test_training()
-# test_compute_weights()
+test_training()
 # test_forward()
 # test_testing()
 # test_sampler()
