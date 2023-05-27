@@ -14,20 +14,21 @@ import time
     ds_layer -> downsampling layer
     ap -> average pooling layer
     fm_dim -> feature map dimension
+    do -> dropout layer
     exp_coeff -> expansion coefficent
     
     
     depth_level:
-    0 -> 18  layers ResNet
-    1 -> 34  layers ResNet
-    2 -> 50  layers ResNet
-    3 -> 101 layers ResNet
-    4 -> 152 layers ResNet
+    0 -> 18  layers ResNet + 1 dropout
+    1 -> 34  layers ResNet + 1 dropout
+    2 -> 50  layers ResNet + 1 dropout
+    3 -> 101 layers ResNet + 1 dropout
+    4 -> 152 layers ResNet + 1 dropout
     
     
     input shape:
     2D -> [batch, colours, width, height]
-    3D -> [batch, frames, colours, width, height]
+    3D -> [batch, colorus, frames, width, height]
 """
 # ------------------------------------------------------ resnet blocks classes
 
@@ -260,6 +261,7 @@ class ResNet2D(nn.Module):
         
         # last block
         self.ap = nn.AdaptiveAvgPool2d((1,1)) # (1,1) output dimension
+        self.do = nn.Dropout(0.3)
         self.fc = nn.Linear(512*self.exp_coeff, self.n_classes)
         
         # self.af_out = nn.Sigmoid() # used directly in the loss function
@@ -319,6 +321,7 @@ class ResNet2D(nn.Module):
         # last block
         x = self.ap(x)
         x = x.reshape(x.shape[0], -1)
+        x = self.do(x)
         x = self.fc(x)
         
         return x
@@ -374,6 +377,7 @@ class ResNet3D(nn.Module):
         
         # last block
         self.ap = nn.AdaptiveAvgPool3d((1,1,1)) # (1,1) output dimension
+        self.do = nn.Dropout(0.3)
         self.fc = nn.Linear(512*self.exp_coeff, self.n_classes)
         
         # self.af_out = nn.Sigmoid() # used directly in the loss function
@@ -432,7 +436,8 @@ class ResNet3D(nn.Module):
     
         # last block
         x = self.ap(x)
-        x = x.reshape(x.shape[0], -1)
+        x = x.reshape(x.shape[0], -1) # from [-1, 512, 1, 1, 1] to [-1, 512], -1 represents the dimension of the batch
+        x = self.do(x)
         x = self.fc(x)
         
         return x

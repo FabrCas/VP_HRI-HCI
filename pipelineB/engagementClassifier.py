@@ -49,7 +49,7 @@ class EngagementClassifier(nn.Module):
         self.batch_size = batch_size
         self.version_dataset = version_dataset
         self.device = T.device("cuda:0" if T.cuda.is_available() else "cpu")
-        self.dataset: Dataset = Dataset(batch_size = self.batch_size, version = version_dataset)
+        self.dataset: Dataset = Dataset(batch_size = self.batch_size, version = version_dataset, grayscale= grayscale)
         
         # Boolean flags for the model
         self.video_resnet = video_resnet
@@ -90,7 +90,7 @@ class EngagementClassifier(nn.Module):
         self.lr = 1e-4
         self.n_epochs = 10
         self.weight_decay = 0.001   # L2 regularization term 
-        self.patience = 3           # patience for earling stopping 
+        self.patience = 5           # patience for earling stopping 
         
         #TODO grid search for the parameters
         
@@ -167,7 +167,7 @@ class EngagementClassifier(nn.Module):
             freq = class_freq[class_]
             class_weights.append(total/freq)
 
-        if verbose: print("class_weights-> ", class_weights)
+        print("Class_weights-> ", class_weights)
         return class_weights
     
     def focal_loss(self, y_pred, y_true, alpha=None, gamma=2, reduction='sum'):
@@ -199,7 +199,7 @@ class EngagementClassifier(nn.Module):
     
     # ---------------- [Train, Validation &  Test functions]
 
-    def valid(self, loader, epoch,):
+    def valid(self, loader, epoch):
         """
             validation that compute the accuracy of the model in the current epoch
         """
@@ -241,7 +241,7 @@ class EngagementClassifier(nn.Module):
         return accuracy
         
 
-    def train(self, name_model = "test", save_model = False, verbose = True):
+    def train(self, name_model = "test", save_model = False, verbose = True, early_stopping = True):
         
         # get the train and validation dataloaders
         train_dataloader = self.dataset.get_trainSet()
@@ -285,7 +285,7 @@ class EngagementClassifier(nn.Module):
             
             for epoch_index in range(self.n_epochs) :
                 
-                print(f"             [Epoch{epoch_index+1}]             \n")
+                print(f"\n             [Epoch{epoch_index+1}]             \n")
                 
                 # cumulative loss for the current epoch
                 loss_epoch = 0
@@ -373,23 +373,25 @@ class EngagementClassifier(nn.Module):
                     name_folder = os.path.join("./models",name_model+ "_" + date_)
                     name_ckpt =  str(epoch_index+1)
                     self._saveModel(name_ckpt, path_folder= name_folder)
-                    
-                # Data validation
-                acc = self.valid(valid_dataloader, epoch = epoch_index+1)
-                print(f"Accuracy from validation: {acc}")
-                valid_history.append(acc)
                 
-                # Early stopping
-                if epoch_index > 0:
-                    if valid_history[-1] < valid_history[-2]:
-                        if patience_counter >= self.patience:
-                            print("Early stop")
-                            break
+                
+                if early_stopping:    
+                    # Data validation
+                    acc = self.valid(valid_dataloader, epoch = epoch_index+1)
+                    print(f"Accuracy from validation: {acc}")
+                    valid_history.append(acc)
+                    
+                    # Early stopping
+                    if epoch_index > 0:
+                        if valid_history[-1] < valid_history[-2]:
+                            if patience_counter >= self.patience:
+                                print("Early stop")
+                                break
+                            else:
+                                print("Pantience counter increased")
+                                patience_counter += 1
                         else:
-                            print("Pantience counter increased")
-                            patience_counter += 1
-                    else:
-                        print("Accuracy increased respect previous epoch")
+                            print("Accuracy increased respect previous epoch")
                 
 
             # save last epoch if not already saved
@@ -447,8 +449,6 @@ class EngagementClassifier(nn.Module):
 
             predictions = np.append(predictions, y_pred.flatten(), axis  =0)
             targets = np.append(targets, label.flatten(), axis  =0)
-            
-            if step_index+1 >= 5: break
             
         # print(predictions.shape)
         # print(predictions)
@@ -516,7 +516,7 @@ class EngagementClassifier(nn.Module):
                             # "average_precision": average_precision_score(targets, output, average= average),     \
                             "hamming_loss": hamming_loss(targets,output),                                        \
                             "jaccard_score": jaccard_score(targets, output, average= average, zero_division=1),  \
-                            "confusion_matrix": confusion_matrix(targets,output, labels= [0,1,2,3], normalize= 'all')
+                            "confusion_matrix": confusion_matrix(targets,output, labels= [0,1,2,3], normalize= None)
         
             }
         
@@ -537,7 +537,7 @@ class EngagementClassifier(nn.Module):
                 #     print("\nconfusion matrix for: {}".format(kcm))
                 print(v)
         
-        self.plot_cm(cm = metrics_results['confusion_matrix'], path_save = path_save, epoch = epoch)
+        self.plot_cm(cm = metrics_results['confusion_matrix'], path_save = path_save, epoch = epoch, duration_timer= None)
         
         return metrics_results
     
@@ -547,19 +547,20 @@ class EngagementClassifier(nn.Module):
             plt.close()
 
         fig, ax = plt.subplots(figsize=(10, 10))
-        timer = fig.canvas.new_timer(interval = duration_timer) # timer object with time interval in ms
-        timer.add_callback(close_event)
+        if duration_timer is not None: 
+            timer = fig.canvas.new_timer(interval = duration_timer) # timer object with time interval in ms
+            timer.add_callback(close_event)
         
         ax.matshow(cm, cmap=plt.cm.Greens, alpha=0.5)
         for i in range(cm.shape[0]):
             for j in range(cm.shape[1]):
-                ax.text(x= j, y = i, s=cm[i, j], va='center', ha='center', size='xx-large')
+                ax.text(x= j, y = i, s= round(cm[i, j], 3), va='center', ha='center', size='xx-large')
                    
         plt.xlabel('Predictions', fontsize=18)
         plt.ylabel('Targets', fontsize=18)
         plt.title('Confusion Matrix 3D ResNet', fontsize=18)
         plt.savefig(os.path.join(path_save, 'testingCM_'+ epoch +'.png'))
-        timer.start()
+        if duration_timer is not None: timer.start()
         plt.show()
         
     def plot_loss(self, loss_array, epoch, path_save = None, duration_timer = 1000):
@@ -571,7 +572,7 @@ class EngagementClassifier(nn.Module):
         if (path_save is not None) and (not os.path.exists(path_save)):
             os.makedirs(path_save)
         
-        plt.style.use('dark_background')
+        # plt.style.use('dark_background')
         
         # define x axis values
         x_values = list(range(1,len(loss_array)+1))
@@ -582,12 +583,16 @@ class EngagementClassifier(nn.Module):
         # plt.scatter(x_values, loss_array, c=colors, cmap='cool')
         
         # Create a colormap
-        cmap = colormaps.get_cmap('Reds')    
-        norm = Normalize(vmin= min(loss_array), vmax= max(loss_array))
+        # cmap = colormaps.get_cmap('Reds')    
+        # norm = Normalize(vmin= min(loss_array), vmax= max(loss_array))
+        
+        color = "green"
     
         # Plot the array with a continuous line color
         for i in range(len(loss_array) -1):
-            plt.plot([x_values[i], x_values[i + 1]], [loss_array[i], loss_array[i + 1]], color=cmap(norm(loss_array[i])) , linewidth=2)
+            # plt.plot([x_values[i], x_values[i + 1]], [loss_array[i], loss_array[i + 1]], color=cmap(norm(loss_array[i])) , linewidth=2)
+            plt.plot([x_values[i], x_values[i + 1]], [loss_array[i], loss_array[i + 1]], color= color , linewidth=2)
+            
 
         
         # text on the plot
@@ -669,10 +674,10 @@ def test_forward_2DNet():
 
 
 def test_forward_3DNet():
-    classifier = EngagementClassifier(args = None, video_resnet= True, depth_level = 0)
+    classifier = EngagementClassifier(args = None, video_resnet= True, depth_level = 0, grayscale= True)
 
     # test summary model
-    rand_input = T.rand(3,30,640,480).to(classifier.device)
+    rand_input = T.rand(1,30,640,480).to(classifier.device)
     print(rand_input.shape)
     rand_input_batch = rand_input.unsqueeze(0)
     print(rand_input_batch.shape)
@@ -682,10 +687,11 @@ def test_forward_3DNet():
     classifier.printSummaryNetwork(inputShape= rand_input.shape)
     
 def test_training():
-    # TODO problem of focal loss when batch size is more than  one
     classifier = EngagementClassifier(batch_size= 2, version_dataset= 'v2', grayscale= False)
     classifier.n_epochs = 2
     classifier.train(name_model= "test_1", save_model= True, verbose= False)
+    # v1 -> {0: 4, 1: 81, 2: 861, 3: 777}
+    # v2 -> {0: 4, 1: 19, 2: 107, 3: 106}
     
 def test_validation():
     classifier = EngagementClassifier(batch_size= 2, version_dataset= 'v2', grayscale= False)
@@ -700,9 +706,9 @@ def test_forward():
     y_pred = classifier.forward(x, verbose = True)
     print(y_pred, y_pred.shape)
 
-def test_testing():
+def test_testing(name, epoch ):
     classifier = EngagementClassifier()
-    classifier.test(epoch_model= 1, folder_model="./models/test_valid_set_23-05-2023", verbose= False)
+    classifier.test(epoch_model= epoch, folder_model="./models/" + name, verbose= False)
 
 def test_sampler():
     x = np.random.rand(1, 300, 3, 640, 480)
@@ -717,22 +723,54 @@ def test_loss_plotting():
     loss = [2,10,40,100,25,13,6,3,2,1]
     classifier.plot_loss(loss, 30, duration_timer= None)
 
-# ----------------------------------------------------------------------------------------training functions 
-def train_1():
-    classifier = EngagementClassifier(batch_size= 4, version_dataset= 'v2', grayscale= False)
-    classifier.train(name_model= "train_v2_batch4_color_depth0", save_model= True, verbose= False)
-    
-
-# classifier = EngagementClassifier(batch_size= 1, version_dataset= 'v2')
 
 # test_forward_2DNet()
 # test_forward_3DNet()
 # test_training()
 # test_validation()
 # test_forward()
-# test_testing()
 # test_sampler()
 # test_loss_plotting()
+# test_testing()
+
+# ----------------------------------------------------------------------------------------training functions 
+
+def train_1():
+    classifier = EngagementClassifier(batch_size= 4, version_dataset= 'v2', grayscale= False)
+    classifier.n_epochs = 10
+    classifier.patience = 3
+    classifier.train(name_model= "train_v2_batch4_color_depth0", save_model= True, verbose= False)
+    
+def train_2():
+    classifier = EngagementClassifier(batch_size= 1, version_dataset= 'v2', grayscale= False)
+    classifier.n_epochs = 15
+    classifier.patience = 5
+    classifier.train(name_model= "train_v2_batch1_color_depth0", save_model= True, verbose= False)  
+
+def train_3():
+    classifier = EngagementClassifier(batch_size= 4, version_dataset= 'v2', grayscale= False)
+    classifier.n_epochs = 50
+    classifier.patience = 10
+    classifier.train(name_model= "train_v2_batch4_color_depth0_epochs50_patience10", save_model= True, verbose= False)
+
+def train_4():
+    classifier = EngagementClassifier(batch_size= 8, version_dataset= 'v2', grayscale= False)
+    classifier.n_epochs = 50
+    # classifier.patience = 50
+    classifier.train(name_model= "train_v2_batch8_color_depth0_epochs50", save_model= True, verbose= False, early_stopping= False)
+
+def train_5():
+    classifier = EngagementClassifier(batch_size= 2, version_dataset= 'v1', grayscale= True)
+    classifier.n_epochs = 5
+    classifier.patience = 5
+    classifier.train(name_model= "train_v1_batch2_gray_depth0_epochs5", save_model= True, verbose= False)  
+
+
+# train_4()
+# test_testing(name="train_v2_batch8_color_depth0_epochs50_27-05-2023", epoch = 50)
+
+
+
 
 
 

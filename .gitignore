@@ -132,4 +132,6 @@ dmypy.json
 
 data/
 models/
+results/
+
 /test.py

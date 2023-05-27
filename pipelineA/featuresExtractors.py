@@ -5,7 +5,9 @@ import torch as T
 import os 
 from time import time
 import numpy as np
+import dlib
 
+print(dlib.__version__)
 # ---------- Face extractors 
 
 class Haar_faceExtractor(object):
@@ -58,7 +60,7 @@ class Haar_faceExtractor(object):
         
         return faces
         
-    def drawFaces(self, img, color = (0, 255,0), thickness = 2, equalize = False):
+    def drawFaces(self, img, color = (0, 255,0), thickness = 2, equalize = False, display = False):
         
         original_image = np.copy(img)
         
@@ -82,8 +84,11 @@ class Haar_faceExtractor(object):
             cv2.rectangle(original_image, (x, y), (x + w, y + h), color, thickness)
             
         # Display the image
-        cv2.imshow('image', original_image)
-        cv2.waitKey(0)
+        if display:
+            cv2.imshow('image', original_image)
+            cv2.waitKey(0)
+        
+        return original_image, faces_box
  
  
 # class HOGSVM_faceExtractor(object):
@@ -194,10 +199,10 @@ class CNN_faceExtractor(object):
                 box = box.astype(int)
                 return box   # self.getImageFromBox(box, img), 
             
-    def drawFaces(self, img, confidence_threshold = 0.3, color = (0, 255,0), thickness = 2):
+    def drawFaces(self, img, confidence_threshold = 0.3, return_most_confident = True, color = (0, 255,0), thickness = 2, display = False):
+        
         # save original dimension
         (h, w) = img.shape[:2]
-        
         
         if self.verbose: s = time()
         
@@ -212,19 +217,36 @@ class CNN_faceExtractor(object):
             last = time() -s 
             print(f"Face extraction in {round(last, 6)}[s]\n")
         
+        output = None
         # filter the boxes for confidence and draw with original dimensions
-        for i in range(0, detections.shape[2]):
-            confidence = detections[0, 0, i, 2]
-            if confidence > confidence_threshold:
-                box = detections[0, 0, i, 3:7] * np.array([w, h, w, h])
+        if not(return_most_confident):
+            for i in range(0, detections.shape[2]):
+                confidence = detections[0, 0, i, 2]
+                if confidence > confidence_threshold:
+                    box = detections[0, 0, i, 3:7] * np.array([w, h, w, h])
+                    (startX, startY, endX, endY) = box.astype(int)
+                    cv2.rectangle(img, (startX, startY), (endX, endY), color, thickness)
+                    output = box
+        else:
+            confidences = [[detections[0, 0, i, 2], i] for i in range(0, detections.shape[2])]
+            max_confidence = max(confidences, key = lambda x: x[:0])
+            if max_confidence[0] > confidence_threshold:
+                box = detections[0, 0, max_confidence[1], 3:7] * np.array([w, h, w, h])   # numpy array [top-left_x, top-left_y, bottom-right_x, bottom-right_y,]
+                box = box.astype(int)
                 (startX, startY, endX, endY) = box.astype(int)
                 cv2.rectangle(img, (startX, startY), (endX, endY), color, thickness)
-                
-        cv2.imshow("image", img)
-        cv2.waitKey(0)
-        
+                output = box
+                 
+        if display:
+            cv2.imshow("image", img)
+            cv2.waitKey(0)
             
- # -------------------------------------- Eyes extractors         
+        return img, output
+        
+        
+                
+ # -------------------------------------- Other extractors         
+ 
 class Haar_eyesDectector(object):
     """
         Fast Eyes extractor using haarcascades algorithm
@@ -312,7 +334,33 @@ class Haar_eyesDectector(object):
         cv2.imshow('image', original_image)
         
         cv2.waitKey(0)
+  
          
+class EyesExtractor(object):
+    """
+        Eyes extractor using dlib
+    """
+    
+    def __init__():
+        super().__init__()
+        
+    def color2gray(self, img):
+        """
+            convert an color image (BGR) to grayscale
+        """
+        return cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    
+    def getEyes(self, frames):
+        pass
+        
+    
+
+
+
+
+
+
+
 # ---------------------------------------------------------------------------------------- test features extractors
 
 def test_extractors(face_extractor = None, eye_extractor = None):

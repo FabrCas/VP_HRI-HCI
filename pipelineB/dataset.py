@@ -64,7 +64,7 @@ class CustomDaisee(Dataset):
         self.colorJitter = transforms.ColorJitter(brightness=0.1, contrast=0.2, saturation=0.3, hue=0.1)
       
     def check_args(self, version, type_ds):
-        if (type_ds not in ['train', 'test', 'validation']) or (version not in ["v1", "v2"]):
+        if (type_ds not in ['train', 'test', 'validation']) or (version not in ["v1", "v2","v3", "v4"]):
             raise ValueError("Not valid arguments for the class {}".format(self.__class__.__name__))
         
     def readVideo(self, path, augment_color = False, read_RGB = False):
@@ -123,7 +123,14 @@ class CustomDaisee(Dataset):
         
         if video.shape[0] > 300:
             video = video[:300]
-               
+            
+        elif video.shape[0] < 300:  # padding with a zero frames, just one is needed and will be skipped durinh the sampling in the classifier
+            n_padding = 300 - video.shape[0]
+            zero_vector = T.zeros(1, video.shape[1], video.shape[2], video.shape[3])
+            for i in range(n_padding):
+                # Concatenate the zero vector along dimension 0
+                video = T.cat([zero_vector, video], dim=0)
+                  
         return video
      
     def __len__(self):
@@ -157,11 +164,12 @@ class CustomDaisee(Dataset):
 
 class Dataset(object):
     
-    def __init__(self, batch_size = 1, grayscale = False, verbose = False):
+    def __init__(self, batch_size = 1, version= 'v2', grayscale = False, verbose = False):
         super().__init__()
         
         self.DATASET_PATH = "/home/faber/Documents/EAI1/data"
         self.batch_size = batch_size
+        self.version = version
         self.verbose = verbose
         
         
@@ -179,7 +187,7 @@ class Dataset(object):
         self.fourcc = cv2.VideoWriter_fourcc(*'mp4v')  # Codec for MP4 video
     
         # load data 
-        self.load_dataset_offline(workers= 0)
+        self.load_dataset_offline(workers= 0, version= self.version)
         
         
     # ------------------------- getters dataloaders
@@ -349,11 +357,10 @@ class Dataset(object):
         data =  json.loads(json_data)
         return data
     
-    
     def save_video(self, frames, file_path, w = None, h = None ): # frames dimensions [frame, width, height, colors], colors rgb
-        # print("frames.shape -> ",frames.shape)
-        # print(file_path)
-        
+        """
+            Save the video as a RGB stream of data
+        """
         if w is None: self.w
         if h is None: self.h
 
@@ -362,8 +369,10 @@ class Dataset(object):
 
         # Write each frame to the video file
         for frame in frames:
-            # Convert the frame from RGB to BGR
-            frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+            
+            # save the video in RGB convention, then when will be loaded using cv2, it turns back in BGR
+            # Convert the frame from BGR to RGB
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             
             # Convert the frame to uint8 if necessary
             if frame.dtype != np.uint8:
@@ -375,8 +384,7 @@ class Dataset(object):
         # Release the VideoWriter object and close the video file
         video_writer.release()
     
-     
-    def extract_face_video(self, extractor, path, show = False):
+    def extract_face_video(self, extractor, path, threshold_update = 5, show = False):
         
         # define dimensions for the new frame
         reshape_w = 120; reshape_h = 150
@@ -394,16 +402,16 @@ class Dataset(object):
 
         show_ = show
         
-        # variable to set the box dimensions
-        first_frame = True
+        # variables to set the box dimensions
+        first_frame = True                          # used to save dimension
         width_box = None; height_box = None
-        prev_center = (None, None)
+        prev_center = (None, None)                  # used to store prev box data 
         prev_cords = (None, None, None, None)
         
         # Read and process each frame of the video
         while True:
             # Read a frame from the video
-            ret, frame = capture.read()   # frame -> (480, 640, 3)
+            ret, frame = capture.read()   # frame -> (480, 640, 3)   #BGR
             
             # If we have reached the end of the video, break out of the loop
             if not ret:
@@ -411,6 +419,10 @@ class Dataset(object):
             
             # sometimes last frame is None
             if frame is not None:
+                
+                # cv2 always expects BGR video
+                frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+                
                 box = extractor.getFaces(frame, return_most_confident=True) # returns numpy array [top-left_x, top-left_y, bottom-right_x, bottom-right_y,]
             
                 if box is None: continue
@@ -445,7 +457,7 @@ class Dataset(object):
                 # check is can be used prev coordinates, this to avoid having a choppy video
                 if not(prev_center == (None, None)):
                     norm = math.sqrt((new_center_x - prev_center[0])**2 + (new_center_y - prev_center[1])**2)
-                    if norm < 2.5:
+                    if norm < threshold_update:
                         topLeft_x      = prev_cords[0]
                         topLeft_y      = prev_cords[1]
                         bottomRight_x  = prev_cords[2]
@@ -600,6 +612,12 @@ class Dataset(object):
           
     def saveCustomDataset_v2(self, type_ds, name_path = "./data/customDAISEE_v2"):
         
+        """ 
+            dataset v2:
+            cropped face version from v1, reduced the dimensionality to improve learning time and
+            performed a sampling operation to reduce unbalance of the data
+        """
+        
         # lambda functions to extrat the progressive used to sort
         get_id_labels = lambda x: int(x.split('_')[1].replace(".json", ""))
         get_id_video  = lambda x: int(x.split('_')[1].replace(".mp4", ""))
@@ -618,7 +636,7 @@ class Dataset(object):
         print(f"Saving {type_ds} set of dataset v2...")
         
         # define the paths to saving folders
-        path_save = os.path.join(name_path, type_ds)
+        path_save   = os.path.join(name_path, type_ds)
         path_save_x = os.path.join(path_save, "video")
         path_save_y = os.path.join(path_save, "gt")
         
@@ -663,9 +681,76 @@ class Dataset(object):
         else: # already built
             return 
         
-    
     def saveCustomDataset_v3(self, type_ds, name_path = "./data/customDAISEE_v3"):
-        # TODO dataset v2, i can perform i.e. HOG
+        
+        """
+            dataset v3:
+            like dataset version v1 (full frames), with reduce dimensionality and balancing (like done for v1)
+        """
+                # lambda functions to extrat the progressive used to sort
+        get_id_labels = lambda x: int(x.split('_')[1].replace(".json", ""))
+        get_id_video  = lambda x: int(x.split('_')[1].replace(".mp4", ""))
+        
+        # checks
+        if not(os.path.exists("./data/customDAISEE_v1")):
+            print("First build the dataset v1")
+            return
+        
+        if type_ds not in ['train', 'validation', 'test']:
+            raise ValueError("Invalid type for the dataset v2")
+        
+        print(f"Saving {type_ds} set of dataset v3...")
+        
+        # define the paths to saving folders
+        path_save   = os.path.join(name_path, type_ds)
+        path_save_x = os.path.join(path_save, "video")
+        path_save_y = os.path.join(path_save, "gt")
+        
+        if not(os.path.exists(path_save)):
+            os.makedirs(path_save)
+            
+            if not(os.path.exists(path_save_x)):
+                os.makedirs(path_save_x)
+                
+            if not(os.path.exists(path_save_y)):   
+                os.makedirs(path_save_y)
+            
+            # sampling indices to reduce dimensionality and balance dataset
+            _, sampled_index = self.balanceLabels(type_ds, verbose = True)
+            
+            print("Saving gt ...")
+            # first copy the gt
+            list_gt_v1 = sorted(os.listdir(os.path.join("./data/customDAISEE_v1", type_ds, "gt")), key = get_id_labels)
+            
+            for idx, name in tqdm(enumerate(list_gt_v1), total= len(list_gt_v1)):
+                # print(name)
+                if not(idx in sampled_index): continue
+            
+                src = os.path.join("./data/customDAISEE_v1", type_ds, "gt", name)
+                dst = os.path.join(path_save_y, name)
+                shutil.copyfile(src, dst)
+                
+            
+            print("Saving video ...")
+            # then extract face and create the new video
+            
+            list_video_v1 = sorted(os.listdir(os.path.join("./data/customDAISEE_v1", type_ds, "video")), key = get_id_video)
+            for idx, name in tqdm(enumerate(list_video_v1), total= len(list_video_v1)):
+                
+                if not(idx in sampled_index): continue
+                
+                old_video_path = os.path.join("./data/customDAISEE_v1", type_ds, "video", name)
+                new_video_path = os.path.join(path_save_x, name)
+                shutil.copyfile(old_video_path, new_video_path)
+                
+                # new_video, new_w, new_h = self.extract_face_video(face_extractor, old_video_path, show = False)
+                # self.save_video(new_video, new_video_path, w= new_w, h= new_h)
+        
+        else: # already built
+            return 
+    
+    def saveCustomDataset_v4(self, type_ds, name_path = "./data/customDAISEE_v4"):
+        # TODO dataset v4, i can perform i.e. HOG
         pass
     
         
@@ -684,6 +769,8 @@ class Dataset(object):
         
         path_v1 = "./data/customDAISEE_v1"
         path_v2 = "./data/customDAISEE_v2"
+        path_v3 = "./data/customDAISEE_v3"
+        path_v4 = "./data/customDAISEE_v4"
         
         if not(os.path.exists(path_v1)):
             os.makedirs(path_v1)
@@ -707,14 +794,21 @@ class Dataset(object):
                     # retry after the download
                     # return self.load_dataset_offline(workers)
                     
-        if version != "v1":
+        if version in ['v2', 'v4']:                 # v4 needs v2
             if not(os.path.exists(path_v2)):
                 os.makedirs(path_v2)
                 self.saveCustomDataset_v2("train",      name_path= path_v2)
                 self.saveCustomDataset_v2("validation", name_path= path_v2)
                 self.saveCustomDataset_v2("test",       name_path= path_v2)
-        
-        if version != "v2":
+                
+        elif version == 'v3':                       # v3 doesn't need v2
+            if not(os.path.exists(path_v3)):
+                os.makedirs(path_v3)
+                self.saveCustomDataset_v3("train",      name_path= path_v3)
+                self.saveCustomDataset_v3("validation", name_path= path_v3)
+                self.saveCustomDataset_v3("test",       name_path= path_v3)
+                
+        if version == "v4":
             pass
         # create pytorch datasets and get the dataloaders
         
@@ -819,30 +913,31 @@ class Dataset(object):
             # unpack data
             video               = T.squeeze(data[0], dim= 0)  # remove batch dimension
             label               = T.squeeze(data[1], dim = 0)
-            timestamps          = T.squeeze(data[2], dim=0)
-            label_description   = data[3][0]
+            # timestamps          = T.squeeze(data[2], dim=0)
+            # label_description   = data[3][0]
             
             # show types
             print(type(video))
             print(type(label))
-            print(type(timestamps))
-            print(type(label_description))
+            # print(type(timestamps))
+            # print(type(label_description))
             
             # show shapes
             print(video.shape)
             print(label.shape)
-            print(timestamps.shape)
+            # print(timestamps.shape)
         
             # show value label
             print(label)
-            print(label_description)
+            # print(label_description)
             
             # show first frame and its dimension 
             for frame in video:
                 
                 print(frame.shape)
                 
-                if show_frames:  
+                if show_frames: 
+                    # using matplotlib, it expects RGB channels, so the image is alterated 
                     frame = frame.permute(1,2,0) # re-ordering dimensions to show
                     plt.imshow(frame)
                     print(frame.shape)
@@ -869,13 +964,11 @@ def test_fetch_speed(dataloader = None):
     print("\nTime elapsed {}".format(t_time))
 
 
+dataset = Dataset(batch_size=1, version='v3')
+# dataset.print_loaderCustomDaisee(dataset.get_trainSet())
 
-dataset = Dataset(batch_size=1)
 # freq, distr = dataset.balanceLabels(type_ds="validation", verbose= True)
 # print(freq)
 # print(distr)
-
-# dataloader = dataset.get_validationSet()
-# dataset.print_loaderCustomDaisee(dataset.get_validationSet)
 # test_fetch_speed(dataloader)
 
