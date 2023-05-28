@@ -964,7 +964,7 @@ def test_fetch_speed(dataloader = None):
     print("\nTime elapsed {}".format(t_time))
 
 
-dataset = Dataset(batch_size=1, version='v3')
+# dataset = Dataset(batch_size=1, version='v3')
 # dataset.print_loaderCustomDaisee(dataset.get_trainSet())
 
 # freq, distr = dataset.balanceLabels(type_ds="validation", verbose= True)

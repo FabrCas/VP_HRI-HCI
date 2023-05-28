@@ -28,7 +28,6 @@ from torch.cuda.amp import GradScaler, autocast
 from models import ResNet2D, ResNet3D
 from dataset import Dataset
 
-
 class EngagementClassifier(nn.Module):
     # class constructor
     def __init__(self, args = None, version_dataset= "v2", video_resnet = True, grayscale = False, depth_level = 0, batch_size = 1):
@@ -409,10 +408,8 @@ class EngagementClassifier(nn.Module):
         
         dataloader = self.dataset.get_testSet()
         n_steps = len(dataloader)
-        # date_ = date.today().strftime("%d-%m-%Y")
         name_model = folder_model.split('models/')[1]
         print("number of samples in the testset{}".format(n_steps))
-    
     
         # load the model and set model in evaluation mode
         try:
@@ -706,8 +703,8 @@ def test_forward():
     y_pred = classifier.forward(x, verbose = True)
     print(y_pred, y_pred.shape)
 
-def test_testing(name, epoch ):
-    classifier = EngagementClassifier()
+def test_testing(name, epoch, version = 'v2', grayscale =False, depth_level = 0, batch_size = 1):
+    classifier = EngagementClassifier(version_dataset= version, grayscale= grayscale, depth_level= depth_level, batch_size=batch_size)
     classifier.test(epoch_model= epoch, folder_model="./models/" + name, verbose= False)
 
 def test_sampler():
@@ -760,14 +757,14 @@ def train_4():
     classifier.train(name_model= "train_v2_batch8_color_depth0_epochs50", save_model= True, verbose= False, early_stopping= False)
 
 def train_5():
-    classifier = EngagementClassifier(batch_size= 2, version_dataset= 'v1', grayscale= True)
+    classifier = EngagementClassifier(batch_size= 2, version_dataset= 'v3', grayscale= True)
     classifier.n_epochs = 5
-    classifier.patience = 5
-    classifier.train(name_model= "train_v1_batch2_gray_depth0_epochs5", save_model= True, verbose= False)  
+    classifier.train(name_model= "train_v3_batch2_gray_depth0_epochs5", save_model= True, verbose= False)  
+    # v3 time learning 33 minutes per epoch
+    # v1 time learning 4h per epoch
 
-
-# train_4()
-# test_testing(name="train_v2_batch8_color_depth0_epochs50_27-05-2023", epoch = 50)
+# train_5()
+# test_testing(name="train_v3_batch2_gray_depth0_epochs5_27-05-2023", epoch = 5, grayscale= True, batch_size= 2)
 
 
 

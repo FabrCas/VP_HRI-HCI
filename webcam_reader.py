@@ -2,7 +2,7 @@ import cv2
 import os
 import re
 import numpy as np
-from pipelineA.featuresExtractors import Haar_faceExtractor, CNN_faceExtractor
+from pipelineA.featuresExtractors import Haar_faceExtractor, CNN_faceExtractor, FeaturesExtractor
 
 
 class WebcamReader(object):
@@ -48,9 +48,13 @@ class WebcamReader(object):
         if not('data' in os.listdir()):
             os.makedirs(self.path_save)
         
-        os.chdir("data")
-        if not('webcam_records' in os.listdir()):
-            os.mkdir("webcam_records")
+        # os.chdir("data")
+            
+        if not(os.path.exists('data/webcam_records')):
+                os.makedirs('data/webcam_records')
+                
+        # if not('data/webcam_records' in os.listdir()):
+        #     os.mkdir("data/webcam_records")
             
     def _get_prog_captures(self):
         files = os.listdir(self.path_save)
@@ -161,10 +165,12 @@ class WebcamReader(object):
                 
         self._close()
     
-    def showExtractors(self):
+    def showFaceCNN(self):
+        """
+            stream the webcam frames detecting the most likely face on the frames using CNN model from cv2
+        """
         self._open()
         
-        # face_extractor = Haar_faceExtractor()  
         face_extractor = CNN_faceExtractor()  
         
         # Loop through frames until the user exits
@@ -172,7 +178,7 @@ class WebcamReader(object):
             # Read a frame from the video capture object
             ret, frame = self.capturer.read()    # BGR channels format
             
-            frame, _ = face_extractor.drawFaces(frame, display= False)
+            frame, _ = face_extractor.drawFace(frame, display= False)
                         
             if not(ret):
                 print("Missing frame...")
@@ -203,7 +209,50 @@ class WebcamReader(object):
         self._close()
     
     
-       
+    def showExtractors(self):
+        self._open()
+        
+        # face_extractor = Haar_faceExtractor()  
+        # face_extractor = CNN_faceExtractor()  
+        feature_extractor = FeaturesExtractor()
+        
+        # Loop through frames until the user exits
+        while True:
+            # Read a frame from the video capture object
+            ret, frame = self.capturer.read()    # BGR channels format
+            
+            frame = feature_extractor.getLandmarks(frame, display= False)
+            
+                        
+            if not(ret):
+                print("Missing frame...")
+            else:
+            
+                # Display the frame in a window
+                cv2.imshow('Webcam', frame)
+                
+                # store the use input with delay
+                key = cv2.waitKey(1)
+                
+                # Wait for the user to press 'q' to exit
+                if key & 0xFF == ord('q'):
+                    print('q is pressed closing all windows')
+                    break
+                
+                # Wait for the user to press 'ESC' to exit
+                if key == 27:
+                    print('esc is pressed closing all windows')
+                    cv2.destroyAllWindows()
+                    break
+                
+                # Check if the user has closed the window
+                if cv2.getWindowProperty("Webcam", cv2.WND_PROP_VISIBLE) <1:
+                    print("Closing...")
+                    break
+                
+        self._close()
+    
+    
     def readVideo(self, name_file, output_size = None, show = True):
         """
             function to read any video, choose the size and whether to show the content.
@@ -269,6 +318,8 @@ def test_capture(webcam):
 
 if __name__ == "__main__":
     webcam = WebcamReader(frame_rate=15, resolution= 480)
+    # webcam.showFaceCNN()
+    
     webcam.showExtractors()
 
     

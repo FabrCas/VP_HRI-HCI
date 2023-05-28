@@ -32,5 +32,7 @@ Compile and install the dlib module
     cd dlib-19.6
     python setup.py install
 
+The dlib predictor can be downloade at the following link: https://www.dlib.net/files/shape_predictor_68_face_landmarks.dat.bz2
+
 
 

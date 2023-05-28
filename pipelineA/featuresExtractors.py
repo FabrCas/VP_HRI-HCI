@@ -7,7 +7,7 @@ from time import time
 import numpy as np
 import dlib
 
-print(dlib.__version__)
+
 # ---------- Face extractors 
 
 class Haar_faceExtractor(object):
@@ -90,14 +90,6 @@ class Haar_faceExtractor(object):
         
         return original_image, faces_box
  
- 
-# class HOGSVM_faceExtractor(object):
-#     """
-#         Fast Face extractor using HOG + SVM 
-#     """
-#    pass
-
-
 class CNN_faceExtractor(object):
     """
         CNN model for face extraction using caffe architecture.
@@ -151,8 +143,10 @@ class CNN_faceExtractor(object):
         (topLeft_x, topLeft_y, bottomRight_x, bottomRight_y) = tuple(box)
         return image[topLeft_y: bottomRight_y, topLeft_x: bottomRight_x, :]
     
-    def getFaces(self, img, return_most_confident = True, confidence_threshold = 0.3):
-        
+    def getFace(self, img, return_most_confident = True, confidence_threshold = 0.3):
+        """
+            get face box
+        """
         # empty list for faces' boxes
         if not (return_most_confident): boxes = []
         
@@ -199,8 +193,10 @@ class CNN_faceExtractor(object):
                 box = box.astype(int)
                 return box   # self.getImageFromBox(box, img), 
             
-    def drawFaces(self, img, confidence_threshold = 0.3, return_most_confident = True, color = (0, 255,0), thickness = 2, display = False):
-        
+    def drawFace(self, img, confidence_threshold = 0.3, return_most_confident = True, color = (0, 255,0), thickness = 2, display = False):
+        """
+            get face box
+        """
         # save original dimension
         (h, w) = img.shape[:2]
         
@@ -336,13 +332,41 @@ class Haar_eyesDectector(object):
         cv2.waitKey(0)
   
          
-class EyesExtractor(object):
+class FeaturesExtractor(object):
     """
-        Eyes extractor using dlib
+        features extractor using dlib
     """
     
-    def __init__():
+    def __init__(self):
         super().__init__()
+        print("dlib version: {}".format(dlib.__version__))
+        
+        # load face detector
+        self.face_extractor = dlib.get_frontal_face_detector()
+        
+        self.checkFileSystem()
+
+        # define the left and right landmarks indices in a tuple representing the interval, i.e left eye indices from 36 ti 41
+        self.landmarks_indices = {"left":(36, 41), "right": (42,47)}  # left and right is intented the one on the image (real is flippend)
+        
+        # dlib predictor for 68 facial landmarks 
+        self.faceLM_predictor = dlib.shape_predictor(os.path.join(self.modelpath, self.modelfile))
+    
+    # -------------- auxiliar functions
+    
+    def checkFileSystem(self):
+        if not('EAI1' in os.getcwd()):
+            os.chdir('Documents/EAI1')
+            
+        self.modelpath = "models/dlib/"
+        if not(os.path.exists(self.modelpath)):
+                os.makedirs(self.modelpath)
+        try:       
+            self.modelfile = [name for name in os.listdir(self.modelpath) if "shape_predictor_68_face_landmarks" in name][0]
+        except Exception as e:
+            print(e)
+            print("Please Load the predictor model from dlib site: https://www.dlib.net/files/shape_predictor_68_face_landmarks.dat.bz2")
+            exit()
         
     def color2gray(self, img):
         """
@@ -350,17 +374,161 @@ class EyesExtractor(object):
         """
         return cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     
-    def getEyes(self, frames):
-        pass
+    def compute_midpoint(self, landmarks, is_left, frame = None, thickness = 2, color = (0,255,0)):
         
+        if is_left:                 # for left eye
+            # compute the left point
+            lp = (landmarks.part(36).x, landmarks.part(36).y)
+            # compute the right point
+            rp = (landmarks.part(39).x, landmarks.part(39).y)
+            line = (lp, rp)
+        else:                       # for right eye
+            # compute the left point
+            lp = (landmarks.part(42).x, landmarks.part(42).y)
+            # compute the right point
+            rp = (landmarks.part(45).x, landmarks.part(45).y)
+            line = (lp, rp)
+        
+        if frame is not None:
+            cv2.line(frame, lp, rp, color, thickness)
+            
+    def getEyes(self, landmarks, is_left, frame = None, thickness = 1, color = (0,255,0)):
+        """
+            from landmarks, returns and show the box for left and right eye
+        """
+        # get all the points for left or right eye
+        if is_left:      
+            points = [(landmarks.part(idx).x, landmarks.part(idx).y)for idx in range(self.landmarks_indices["left"][0], self.landmarks_indices["left"][1] +1)]
+        else:
+            points = [(landmarks.part(idx).x, landmarks.part(idx).y)for idx in range(self.landmarks_indices["right"][0], self.landmarks_indices["right"][1] +1)]
+        
+        # print(points)
+        
+        # compute top left point
+        xtl = min(points, key= lambda x: x[0])[0]
+        ytl = max(points, key= lambda x: x[1])[1]
+        
+        # compute bottom right point
+        xbr = max(points, key= lambda x: x[0])[0]
+        ybr = min(points, key= lambda x: x[1])[1]
+        
+        box = ((xtl, ytl),(xbr,ybr))
+
+        if frame is not None:
+            (ptl, pbr) = box    # unpack box as top-left point and bottom-right point
+            
+            cv2.rectangle(frame, (ptl[0], ptl[1]), (pbr[0], pbr[1]), color, thickness)
+        
+        return box
+            
+    # -------------- feature extraction functions
     
+    def getFace(self, frame, display = False, color = (0,255,0), thickness = 2):
+        """
+            return both the face box of the face and draw the corresponding bounding box on the face
+        """
+        
+        if frame.shape[2] != 1: # convert in grayscale
+            frame_g = self.color2gray(frame)
+        
+        faces = self.face_extractor(frame_g)   # return an array with all the faces (box), ordered by confidence
+        
+        for face in faces:
+            
+            # get the top-left and the bottom-right points 
+            top_left_point      = (face.left(), face.top())
+            bottom_right_point  = (face.right(), face.bottom())
+            
+            cv2.rectangle(frame, (top_left_point[0], top_left_point[1]), (bottom_right_point[0], bottom_right_point[1]), color, thickness)
+        
+        if display:
+            cv2.imshow("image", frame)
+            cv2.waitKey(0)
+         
+        return frame
+    
+    def getLandmarks(self, frame, display = False, color = (0,255,0), thickness = 2, to_show = ["face_box", 'eyes_lm','eyes_boxes']):
+        """
+            draws the face box, needed to find eye landmarks and returns the boxes
+        """
+        
+        # define the output dictionary:
+        output = {}
+        
+        if frame.shape[2] != 1: # convert in grayscale
+            frame_g = self.color2gray(frame)
+        
+        faces = self.face_extractor(frame_g)   # return an array with all the faces (box), ordered by confidence
+        
+        # if is not found any face, returns the original frame and None as the output
+        
+        if len(faces) == 0:
+            return frame, None
+        
+        # take the most likely face
+        face = faces[0]
+        
+        # for face in faces:
+            
+        # get the top-left and the bottom-right points 
+        top_left_point      = (face.left(), face.top())
+        bottom_right_point  = (face.right(), face.bottom())
+        
+        if "face_box" in to_show:
+            cv2.rectangle(frame, (top_left_point[0], top_left_point[1]), (bottom_right_point[0], bottom_right_point[1]), color, thickness)
 
-
-
-
-
-
-
+        output['face_box'] = (top_left_point, bottom_right_point)
+        
+        # computes the landmarks
+        landmarks = self.faceLM_predictor(frame_g, face)  # returns an object detection object
+        
+        left_eye_lm = []
+        # draw for left eye
+        for idx in range(self.landmarks_indices["left"][0], self.landmarks_indices["left"][1] +1):
+            # get x and y landmark
+            x = landmarks.part(idx).x
+            y = landmarks.part(idx).y
+            # store
+            left_eye_lm.append((x,y))
+            # draw it
+            if "eyes_lm" in to_show: cv2.circle(frame, (x,y), radius= 2, color = (0,255,0))
+        
+        right_eye_lm = []
+        
+        # draw for right eye
+        for idx in range(self.landmarks_indices["right"][0], self.landmarks_indices["right"][1] +1):
+            # get x and y landmark
+            x = landmarks.part(idx).x
+            y = landmarks.part(idx).y
+            # store
+            right_eye_lm.append((x,y))
+            # draw it
+            if "eyes_lm" in to_show: cv2.circle(frame, (x,y), radius= 2, color = (0,255,0))
+        
+        output['left_eye_lm']   = left_eye_lm
+        output['right_eye_lm']  = right_eye_lm
+        
+        # self.compute_midpoint(landmarks, is_left= True, frame= frame)
+        # self.compute_midpoint(landmarks, is_left= False, frame= frame)
+        
+        if "eyes_boxes" in to_show:
+            box_left_eye  = self.getEyes(landmarks, is_left= True, frame= frame)            # to avoid the showing of the boss, not pass the frame
+            box_right_eye  = self.getEyes(landmarks, is_left= False, frame= frame)
+        else:
+            box_left_eye  = self.getEyes(landmarks, is_left= True)            # to avoid the showing of the boss, not pass the frame
+            box_right_eye  = self.getEyes(landmarks, is_left= False)
+        
+        
+        output['left_eye_box']  = box_left_eye
+        output['right_eye_box'] = box_right_eye
+        
+        if display:
+            cv2.imshow("image", frame)
+            cv2.waitKey(0)
+         
+        return frame, output
+        
+        
 # ---------------------------------------------------------------------------------------- test features extractors
 
 def test_extractors(face_extractor = None, eye_extractor = None):
@@ -409,9 +577,30 @@ def test_getFaces(face_extractor):
             cv2.imshow("image", result)
             cv2.waitKey(0)
         
+def test_LMDetection(features_extractor: FeaturesExtractor):
 
+    if not('EAI1' in os.getcwd()):  
+        os.chdir('Documents/EAI1')
+
+    path2images = "./data/test_pipelineA"
+    for name_file in os.listdir(path2images):
+        path = os.path.join(path2images, name_file)
+        img = cv2.imread(path)
+        cv2.imshow('image', img)
+        key = cv2.waitKey(0)
+
+        if (key & 0xFF == ord('q')) or (key == 27):
+            print('Test ended from user input')
+            break
         
+        frame, out = features_extractor.getLandmarks(img, to_show = ["face_box",'eyes_boxes'])
+        print(out)
 
+        cv2.imshow("image", frame)
+        cv2.waitKey(0)
+
+    
+    
 # face_extractor = Haar_faceExtractor(verbose = True)
 # eye_extractor = Haar_eyesDectector(verbose =  True)
 # test_extractors(face_extractor, eye_extractor)
@@ -419,3 +608,7 @@ def test_getFaces(face_extractor):
 # face_extractor = CNN_faceExtractor(verbose = True)
 # test_extractors(face_extractor)
 # test_getFaces(face_extractor)
+
+
+ext = FeaturesExtractor()
+test_LMDetection(ext)
