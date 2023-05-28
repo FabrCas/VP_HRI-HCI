@@ -2,7 +2,7 @@
 Project related to the first module of "Elective in AI" Course. Topic -> AI for Visual Perception
 
 
-## Required slib
+## Required dlib
 Use these commands to install from source code on Ubuntu.
 First check to already satisfy these dependecies:
 
