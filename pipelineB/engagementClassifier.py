@@ -15,6 +15,7 @@ from matplotlib.colors import Normalize
 # classification metrics 
 from sklearn.metrics import precision_score, recall_score, f1_score,     \
         confusion_matrix, hamming_loss, jaccard_score, accuracy_score
+        
     
 # torch import
 import torch as T
@@ -85,15 +86,12 @@ class EngagementClassifier(nn.Module):
         self.output_af  = F.softmax             # F.log_softmax
         self.loss_f     = F.cross_entropy       # nn.CrossEntropyLoss
         
-        # learning parameters
+        # learning parameters (default)
         self.lr = 1e-4
         self.n_epochs = 10
         self.weight_decay = 0.001   # L2 regularization term 
         self.patience = 5           # patience for earling stopping 
-        
-        #TODO grid search for the parameters
-        
-        
+                
     # ---------------- [initialization functions]
     
     def init_weights_normal(self):
@@ -256,8 +254,13 @@ class EngagementClassifier(nn.Module):
         self.model.train()
         
         # define optimizer, scheduler & scaler
+        
+
         optimizer = Adam(self.model.parameters(), lr = self.lr, weight_decay =  self.weight_decay,)
-        scheduler = lr_scheduler.OneCycleLR(optimizer, max_lr=self.lr, steps_per_epoch=n_steps, epochs=self.n_epochs, pct_start=0.3)
+        
+        # scheduler = lr_scheduler.OneCycleLR(optimizer, max_lr=self.lr, steps_per_epoch=n_steps, epochs=self.n_epochs, pct_start=0.3)
+        scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor = 0.5, patience = 5, cooldown = 2, min_lr = 1e-5, verbose = True) # reduce of a half the learning rate 
+        
         scaler = GradScaler()
         
         # initialize list to store the losses of each epoch
@@ -346,15 +349,14 @@ class EngagementClassifier(nn.Module):
                     # update scaler
                     scaler.update()
                     
-                    # update schedulers
-                    scheduler.step()
+                    # update schedulers if one cycle LR
+                    # scheduler.step()
                     
                     # print info every 50 steps 
                     if ((step_index+1)%loss_steps_freq)== 0:
                         
-                        print('Epoch [{}/{}], Step [{}/{}], LR {:.1e}, Loss: {:.3f}'
+                        print('Epoch [{}/{}], Step [{}/{}], Loss: {:.3f}'
                                 .format(epoch_index+1, self.n_epochs, str(step_index+1).zfill(3), str(n_steps).zfill(3),
-                                        scheduler.get_last_lr()[0], \
                                         tmp_loss/loss_steps_freq))
                         
                         loss_steps.append(tmp_loss/loss_steps_freq)
@@ -374,12 +376,12 @@ class EngagementClassifier(nn.Module):
                     self._saveModel(name_ckpt, path_folder= name_folder)
                 
                 
-                if early_stopping:    
-                    # Data validation
-                    acc = self.valid(valid_dataloader, epoch = epoch_index+1)
-                    print(f"Accuracy from validation: {acc}")
-                    valid_history.append(acc)
-                    
+                # Data validation
+                acc = self.valid(valid_dataloader, epoch = epoch_index+1)
+                print(f"Accuracy from validation: {acc}")
+                valid_history.append(acc)
+                
+                if early_stopping:   
                     # Early stopping
                     if epoch_index > 0:
                         if valid_history[-1] < valid_history[-2]:
@@ -392,6 +394,8 @@ class EngagementClassifier(nn.Module):
                         else:
                             print("Accuracy increased respect previous epoch")
                 
+                # based on the accuracy update the learning rate
+                scheduler.step(acc)
 
             # save last epoch if not already saved
             if not(saved):
@@ -507,12 +511,13 @@ class EngagementClassifier(nn.Module):
                 os.makedirs(path_save)
 
         metrics_results = {
-                            "precision":precision_score(targets, output, average = average, zero_division=1,),    \
-                            "recall": recall_score(targets, output, average = average, zero_division=1),         \
-                            "f1-score": f1_score(targets, output, average= average, zero_division=1),            \
+                            "accuracy":         accuracy_score(targets, output, normalize= True),
+                            "precision":        precision_score(targets, output, average = average, zero_division=1,),    \
+                            "recall":           recall_score(targets, output, average = average, zero_division=1),         \
+                            "f1-score":         f1_score(targets, output, average= average, zero_division=1),            \
                             # "average_precision": average_precision_score(targets, output, average= average),     \
-                            "hamming_loss": hamming_loss(targets,output),                                        \
-                            "jaccard_score": jaccard_score(targets, output, average= average, zero_division=1),  \
+                            "hamming_loss":     hamming_loss(targets,output),                                        \
+                            "jaccard_score":    jaccard_score(targets, output, average= average, zero_division=1),  \
                             "confusion_matrix": confusion_matrix(targets,output, labels= [0,1,2,3], normalize= None)
         
             }
@@ -686,7 +691,7 @@ def test_forward_3DNet():
 def test_training():
     classifier = EngagementClassifier(batch_size= 2, version_dataset= 'v2', grayscale= False)
     classifier.n_epochs = 2
-    classifier.train(name_model= "test_1", save_model= True, verbose= False)
+    classifier.train(name_model= "test", save_model= True, verbose= False)
     # v1 -> {0: 4, 1: 81, 2: 861, 3: 777}
     # v2 -> {0: 4, 1: 19, 2: 107, 3: 106}
     
@@ -720,15 +725,16 @@ def test_loss_plotting():
     loss = [2,10,40,100,25,13,6,3,2,1]
     classifier.plot_loss(loss, 30, duration_timer= None)
 
-
-# test_forward_2DNet()
-# test_forward_3DNet()
-# test_training()
-# test_validation()
-# test_forward()
-# test_sampler()
-# test_loss_plotting()
-# test_testing()
+if __name__ == "__main__":
+    pass  
+    # test_forward_2DNet()
+    # test_forward_3DNet()
+    test_training()
+    # test_validation()
+    # test_forward()
+    # test_sampler()
+    # test_loss_plotting()
+    # test_testing()
 
 # ----------------------------------------------------------------------------------------training functions 
 
@@ -762,9 +768,11 @@ def train_5():
     classifier.train(name_model= "train_v3_batch2_gray_depth0_epochs5", save_model= True, verbose= False)  
     # v3 time learning 33 minutes per epoch
     # v1 time learning 4h per epoch
-
-# train_5()
-# test_testing(name="train_v3_batch2_gray_depth0_epochs5_27-05-2023", epoch = 5, grayscale= True, batch_size= 2)
+    
+if __name__ == "__main__":  
+    pass
+    # train_5()
+    # test_testing(name="train_v3_batch2_gray_depth0_epochs5_27-05-2023", epoch = 5, grayscale= True, batch_size= 2)
 
 
 

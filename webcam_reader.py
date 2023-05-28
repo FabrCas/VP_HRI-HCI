@@ -208,12 +208,9 @@ class WebcamReader(object):
                 
         self._close()
     
-    
     def showExtractors(self):
         self._open()
         
-        # face_extractor = Haar_faceExtractor()  
-        # face_extractor = CNN_faceExtractor()  
         feature_extractor = FeaturesExtractor()
         
         # Loop through frames until the user exits
@@ -221,9 +218,8 @@ class WebcamReader(object):
             # Read a frame from the video capture object
             ret, frame = self.capturer.read()    # BGR channels format
             
-            frame = feature_extractor.getLandmarks(frame, display= False)
-            
-                        
+            frame, _ = feature_extractor.getLandmarks(frame, display= False, to_show=['face_box', 'eyes_lm', 'axes'])
+               
             if not(ret):
                 print("Missing frame...")
             else:
@@ -318,8 +314,7 @@ def test_capture(webcam):
 
 if __name__ == "__main__":
     webcam = WebcamReader(frame_rate=15, resolution= 480)
-    # webcam.showFaceCNN()
-    
+    webcam.showFaceCNN()
     webcam.showExtractors()
 
     

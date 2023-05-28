@@ -374,7 +374,7 @@ class FeaturesExtractor(object):
         """
         return cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     
-    def compute_midpoint(self, landmarks, is_left, frame = None, thickness = 2, color = (0,255,0)):
+    def compute_horizontalAxis(self, landmarks, is_left, frame = None, thickness = 1, color = (0,255,0)):
         
         if is_left:                 # for left eye
             # compute the left point
@@ -391,6 +391,31 @@ class FeaturesExtractor(object):
         
         if frame is not None:
             cv2.line(frame, lp, rp, color, thickness)
+            
+    def compute_verticalAxis(self, landmarks, is_left, frame = None, thickness = 1, color = (0,255,0)):
+        
+        if is_left:                 # for left eye
+            # compute the top midpoints
+            
+            tp = (int((landmarks.part(37).x + landmarks.part(38).x)/2),
+                  int((landmarks.part(37).y + landmarks.part(38).y)/2))
+            # compute the bottom point
+            bp = (int((landmarks.part(41).x + landmarks.part(40).x)/2),
+                  int((landmarks.part(41).y + landmarks.part(40).y)/2))
+                 
+            line = (tp, bp)
+        else:                       # for right eye
+            
+            tp = (int((landmarks.part(43).x + landmarks.part(44).x)/2),
+                  int((landmarks.part(43).y + landmarks.part(44).y)/2))
+            # compute the bottom point
+            bp = (int((landmarks.part(47).x + landmarks.part(46).x)/2),
+                  int((landmarks.part(47).y + landmarks.part(46).y)/2))
+                 
+            line = (tp, bp)
+        
+        if frame is not None:
+            cv2.line(frame, tp, bp, color, thickness)
             
     def getEyes(self, landmarks, is_left, frame = None, thickness = 1, color = (0,255,0)):
         """
@@ -447,9 +472,12 @@ class FeaturesExtractor(object):
          
         return frame
     
-    def getLandmarks(self, frame, display = False, color = (0,255,0), thickness = 2, to_show = ["face_box", 'eyes_lm','eyes_boxes']):
+    def getLandmarks(self, frame, display = False, color = (0,255,0), thickness = 2, to_show = ['face_box', 'eyes_lm', 'eyes_boxes', 'axes']):
         """
             draws the face box, needed to find eye landmarks and returns the boxes
+            @ param frame: input image
+            @ to_show: vector containing the keywords to choose what to display on the frame, the values are: 'face_box', 'eyes_lm', 'eyes_boxes'
+            
         """
         
         # define the output dictionary:
@@ -491,7 +519,7 @@ class FeaturesExtractor(object):
             # store
             left_eye_lm.append((x,y))
             # draw it
-            if "eyes_lm" in to_show: cv2.circle(frame, (x,y), radius= 2, color = (0,255,0))
+            if "eyes_lm" in to_show: cv2.circle(frame, (x,y), radius= 1, color = (0,255,0))
         
         right_eye_lm = []
         
@@ -503,13 +531,16 @@ class FeaturesExtractor(object):
             # store
             right_eye_lm.append((x,y))
             # draw it
-            if "eyes_lm" in to_show: cv2.circle(frame, (x,y), radius= 2, color = (0,255,0))
+            if "eyes_lm" in to_show: cv2.circle(frame, (x,y), radius= 1, color = (0,255,0))
         
         output['left_eye_lm']   = left_eye_lm
         output['right_eye_lm']  = right_eye_lm
         
-        # self.compute_midpoint(landmarks, is_left= True, frame= frame)
-        # self.compute_midpoint(landmarks, is_left= False, frame= frame)
+        if 'axes' in to_show:
+            self.compute_horizontalAxis(landmarks, is_left= True, frame= frame)
+            self.compute_horizontalAxis(landmarks, is_left= False, frame= frame)
+            self.compute_verticalAxis(landmarks, is_left= True, frame= frame)
+            self.compute_verticalAxis(landmarks, is_left= False, frame= frame)
         
         if "eyes_boxes" in to_show:
             box_left_eye  = self.getEyes(landmarks, is_left= True, frame= frame)            # to avoid the showing of the boss, not pass the frame
@@ -593,22 +624,22 @@ def test_LMDetection(features_extractor: FeaturesExtractor):
             print('Test ended from user input')
             break
         
-        frame, out = features_extractor.getLandmarks(img, to_show = ["face_box",'eyes_boxes'])
+        frame, out = features_extractor.getLandmarks(img, to_show = ["face_box",'eyes_boxes', 'axes'])
         print(out)
 
         cv2.imshow("image", frame)
         cv2.waitKey(0)
 
     
-    
-# face_extractor = Haar_faceExtractor(verbose = True)
-# eye_extractor = Haar_eyesDectector(verbose =  True)
-# test_extractors(face_extractor, eye_extractor)
+if __name__ == "__main__":  
+    # face_extractor = Haar_faceExtractor(verbose = True)
+    # eye_extractor = Haar_eyesDectector(verbose =  True)
+    # test_extractors(face_extractor, eye_extractor)
 
-# face_extractor = CNN_faceExtractor(verbose = True)
-# test_extractors(face_extractor)
-# test_getFaces(face_extractor)
+    # face_extractor = CNN_faceExtractor(verbose = True)
+    # test_extractors(face_extractor)
+    # test_getFaces(face_extractor)
 
 
-ext = FeaturesExtractor()
-test_LMDetection(ext)
+    ext = FeaturesExtractor()
+    test_LMDetection(ext)

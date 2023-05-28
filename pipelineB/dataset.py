@@ -96,7 +96,7 @@ class CustomDaisee(Dataset):
             # sometimes last frame is None
             if frame is not None:
                 
-                if self.grayscale:
+                if self.grayscale and (len(frame.shape) == 2 or frame.shape[2]==1):   # look if it's needed, i.e. v4 doesn't need
                     frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
                 else:
                     # from BGR to RGB if requested
@@ -221,7 +221,14 @@ class Dataset(object):
         
         # new_frame = T.clamp(new_frame, 0, 1).to(T.float32)
         return new_frame
-    
+ 
+    def sobelmagnitude(self, frame):
+        
+        sobelx = cv2.Sobel(frame,cv2.CV_64F,1,0,ksize=5,borderType=cv2.BORDER_DEFAULT )
+        sobely = cv2.Sobel(frame,cv2.CV_64F,0,1,ksize=5, borderType=cv2.BORDER_DEFAULT)
+        new_frame = np.sqrt(sobelx**2 + sobely**2)
+        return new_frame
+
     # First type of pre-processing enhancing the image
     def preprocessImage(self, video, use_histo = False):
         video_frames_ppr = []
@@ -372,7 +379,11 @@ class Dataset(object):
             
             # save the video in RGB convention, then when will be loaded using cv2, it turns back in BGR
             # Convert the frame from BGR to RGB
-            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            # if frame.shape[2] == 3:
+            try:
+                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            except:
+                pass
             
             # Convert the frame to uint8 if necessary
             if frame.dtype != np.uint8:
@@ -498,6 +509,75 @@ class Dataset(object):
         
         # print(video.shape) 
         return video, reshape_w, reshape_h  # return numpy array
+    
+    def preprocessingV4(self, path, show = False):
+        
+        # define the empty list that will contains the frames
+        frames = []
+        
+        # Open the video file for reading
+        capture = cv2.VideoCapture(path)
+        
+        # Check if the video file was opened successfully
+        if not capture.isOpened():
+            print('Error opening video file')
+            exit()
+
+        show_ = show
+        
+        # Read and process each frame of the video
+        while True:
+            # Read a frame from the video
+            ret, frame = capture.read()   # frame -> (480, 640, 3)   #BGR
+            
+            # If we have reached the end of the video, break out of the loop
+            if not ret:
+                break
+            
+            # sometimes last frame is None
+            if frame is not None:
+                
+                # cv2 always expects BGR video
+                frame_g = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                
+                # equalize image 
+                
+                new_frame = cv2.equalizeHist(frame_g)
+                
+                # try canny
+                # new_frame  =cv2.Canny(new_frame, threshold1= 150, threshold2= 200)
+                
+                # try residual
+                # img_blur = cv2.GaussianBlur(new_frame,(9,9),0)
+                # new_frame = cv2.subtract(new_frame,img_blur)
+                
+                # filters
+                # new_frame = cv2.Laplacian(new_frame, ddepth= cv2.CV_32F)
+                # sobelx = cv2.Sobel(new_frame,cv2.CV_64F,1,0,ksize=5,borderType=cv2.BORDER_DEFAULT )
+                # sobely = cv2.Sobel(new_frame,cv2.CV_64F,0,1,ksize=5, borderType=cv2.BORDER_DEFAULT)
+                # new_frame = np.sqrt(sobelx**2 + sobely**2)
+                
+                
+                if show_:
+                    plt.imshow(new_frame, cmap= 'gray')
+                    
+                    plt.show()
+                    show_ = False
+                
+                # fill the list of frames
+                frames.append(new_frame)
+
+        # Release the video capture object and close all windows
+        capture.release()
+        
+        # return the Torch  tensor representing the video frames
+        video = np.stack(frames)
+        # video = T.stack(frames)
+        
+        if video.shape[0] > 300:
+            video = video[:300]
+        
+        return video
         
     def download_dataset(self):
         """
@@ -750,8 +830,59 @@ class Dataset(object):
             return 
     
     def saveCustomDataset_v4(self, type_ds, name_path = "./data/customDAISEE_v4"):
-        # TODO dataset v4, i can perform i.e. HOG
-        pass
+
+        """ 
+            dataset v4:
+            data from v2 dataset, converted in grayscale and performed the histogram equalization
+        """
+        
+        # checks
+        if not(os.path.exists("./data/customDAISEE_v2")):   # based on v2
+            print("First build the dataset v2")
+            return
+        
+        if type_ds not in ['train', 'validation', 'test']:
+            raise ValueError("Invalid type for the dataset v2")
+        
+        print(f"Saving {type_ds} set of dataset v4...")
+        
+        # define the paths to saving folders
+        path_save   = os.path.join(name_path, type_ds)
+        path_save_x = os.path.join(path_save, "video")
+        path_save_y = os.path.join(path_save, "gt")
+        
+        if not(os.path.exists(path_save)):
+            os.makedirs(path_save)
+            
+            if not(os.path.exists(path_save_x)):
+                os.makedirs(path_save_x)
+                
+            if not(os.path.exists(path_save_y)):   
+                os.makedirs(path_save_y)
+
+            print("Saving gt ...")
+            # first copy the gt
+            list_gt_v1 = os.listdir(os.path.join("./data/customDAISEE_v2", type_ds, "gt"))
+        
+            for name in tqdm(list_gt_v1):
+            
+                src = os.path.join("./data/customDAISEE_v2", type_ds, "gt", name)
+                dst = os.path.join(path_save_y, name)
+                shutil.copyfile(src, dst)
+                
+            print("Saving video ...")
+            # then extract face and create the new video
+            v2_w = 120; v2_h = 150
+            list_video_v1 = os.listdir(os.path.join("./data/customDAISEE_v2", type_ds, "video"))
+            for name in tqdm(list_video_v1):
+                
+                old_video_path = os.path.join("./data/customDAISEE_v2", type_ds, "video", name)
+                new_video_path = os.path.join(path_save_x, name)
+                new_video = self.preprocessingV4(path = old_video_path, show = False)
+                self.save_video(new_video, new_video_path, w= v2_w, h= v2_h)
+                
+        else: # already built
+            return 
     
         
     def load_dataset_offline(self, workers = 0, version = "v2"):
@@ -767,6 +898,7 @@ class Dataset(object):
         if not('EAI1' in os.getcwd()):
             os.chdir('Documents/EAI1')
         
+        # path definition for the different custom versions
         path_v1 = "./data/customDAISEE_v1"
         path_v2 = "./data/customDAISEE_v2"
         path_v3 = "./data/customDAISEE_v3"
@@ -788,7 +920,8 @@ class Dataset(object):
                         (os.path.exists("./EAI1/data/hub_activeloop_daisee-train")) and 
                         (os.path.exists("./EAI1/data/hub_activeloop_daisee-validation")) ):
                     print("No data found locally, starting the download...")
-                
+                    
+                    # TODO reinsert the autodownload
                     # self.download_dataset()
                     
                     # retry after the download
@@ -809,7 +942,12 @@ class Dataset(object):
                 self.saveCustomDataset_v3("test",       name_path= path_v3)
                 
         if version == "v4":
-            pass
+            if not(os.path.exists(path_v4)):
+                os.makedirs(path_v4)
+                self.saveCustomDataset_v4("train",      name_path= path_v4)
+                self.saveCustomDataset_v4("validation", name_path= path_v4)
+                self.saveCustomDataset_v4("test",       name_path= path_v4)
+            
         # create pytorch datasets and get the dataloaders
         
         custom_ds_train= CustomDaisee(type_ds="train", version= version, grayscale= self.grayscale)
@@ -826,6 +964,7 @@ class Dataset(object):
         self.train_dataloader = train_dataloader
         self.valid_dataloader = valid_dataloader
         self.test_dataloader  = test_dataloader
+        
         return 
     
     def load_dataset_online(self, batch_size = 1, workers = 0):
@@ -963,12 +1102,12 @@ def test_fetch_speed(dataloader = None):
     t_time = time() - start
     print("\nTime elapsed {}".format(t_time))
 
+if __name__ == "__main__":  
+    dataset = Dataset(batch_size=1, version='v4')
+    # dataset.print_loaderCustomDaisee(dataset.get_trainSet())
 
-# dataset = Dataset(batch_size=1, version='v3')
-# dataset.print_loaderCustomDaisee(dataset.get_trainSet())
-
-# freq, distr = dataset.balanceLabels(type_ds="validation", verbose= True)
-# print(freq)
-# print(distr)
-# test_fetch_speed(dataloader)
+    # freq, distr = dataset.balanceLabels(type_ds="validation", verbose= True)
+    # print(freq)
+    # print(distr)
+    # test_fetch_speed(dataloader)
 
