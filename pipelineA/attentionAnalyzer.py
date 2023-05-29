@@ -43,7 +43,6 @@ class AttentionAnalyzer():
         """
             compute the face alignement from landmarks
         """
-    
         
         # if frame and landmarks
         # compute points to infer the yaw orientatation of the face
@@ -58,8 +57,6 @@ class AttentionAnalyzer():
         dy = nose_tip[1] - midpoint_y
         
         alpha_angle = math.degrees(math.atan2(dy, dx)) - 90
-        
-        
         
         # relative reference frame
         re_segment = (right_eye[0] - midpoint_x, right_eye[1] - midpoint_y)
