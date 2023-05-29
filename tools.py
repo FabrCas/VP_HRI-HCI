@@ -2,7 +2,8 @@ import cv2
 import os
 import re
 import numpy as np
-from pipelineA.featuresExtractors import Haar_faceExtractor, CNN_faceExtractor, FeaturesExtractor
+from pipelineA.featuresExtractors import CNN_faceExtractor, FeaturesExtractor
+from pipelineA.attentionAnalyzer import AttentionAnalyzer
 
 
 class WebcamReader(object):
@@ -218,7 +219,52 @@ class WebcamReader(object):
             # Read a frame from the video capture object
             ret, frame = self.capturer.read()    # BGR channels format
             
-            frame, _ = feature_extractor.getLandmarks(frame, display= False, to_show=['face_box', 'eyes_lm', 'axes'])
+            if frame is None: continue
+            
+            frame, _, _  = feature_extractor.getLandmarks(frame, display= False, to_show=['face_box', 'eyes_lm', 'axes_eyes', 'yaw_face', 'debug_yaw'])
+               
+            if not(ret):
+                print("Missing frame...")
+            else:
+            
+                # Display the frame in a window
+                cv2.imshow('Webcam', frame)
+                
+                # store the use input with delay
+                key = cv2.waitKey(1)
+                
+                # Wait for the user to press 'q' to exit
+                if key & 0xFF == ord('q'):
+                    print('q is pressed closing all windows')
+                    break
+                
+                # Wait for the user to press 'ESC' to exit
+                if key == 27:
+                    print('esc is pressed closing all windows')
+                    cv2.destroyAllWindows()
+                    break
+                
+                # Check if the user has closed the window
+                if cv2.getWindowProperty("Webcam", cv2.WND_PROP_VISIBLE) <1:
+                    print("Closing...")
+                    break
+                
+        self._close()
+        
+    def showAnalyzer(self):
+        self._open()
+        
+        analyzer = AttentionAnalyzer()
+        
+        # Loop through frames until the user exits
+        while True:
+            # Read a frame from the video capture object
+            ret, frame = self.capturer.read()    # BGR channels format
+            
+            # flip frame
+            frame = cv2.flip(frame, flipCode= 1)
+            
+            frame = analyzer.forward(frame, to_show=['face_box', 'axes_eyes', 'yaw_face', 'debug_yaw'])
                
             if not(ret):
                 print("Missing frame...")
@@ -303,7 +349,20 @@ class WebcamReader(object):
         
         # return the numpy array representing the video frames
         return np.array(frames)
-        
+      
+      
+class Plotter(object):
+    
+    def __init__(self):
+        super(Plotter).__init__()      
+      
+
+class Scorer(object):
+    
+    def __init__(self):
+        super(Plotter).__init__()       
+      
+      
 # ------------------- test functions
 def test_reading(webcam):
     frames = webcam.readVideo("test_capture.avi", show=True)
@@ -314,8 +373,8 @@ def test_capture(webcam):
 
 if __name__ == "__main__":
     webcam = WebcamReader(frame_rate=15, resolution= 480)
-    webcam.showFaceCNN()
-    webcam.showExtractors()
+    # webcam.showFaceCNN()
+    webcam.showAnalyzer()
 
     
 

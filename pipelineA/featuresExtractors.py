@@ -3,6 +3,7 @@ import urllib
 import urllib.request
 import torch as T
 import os 
+import math
 from time import time
 import numpy as np
 import dlib
@@ -427,8 +428,6 @@ class FeaturesExtractor(object):
         else:
             points = [(landmarks.part(idx).x, landmarks.part(idx).y)for idx in range(self.landmarks_indices["right"][0], self.landmarks_indices["right"][1] +1)]
         
-        # print(points)
-        
         # compute top left point
         xtl = min(points, key= lambda x: x[0])[0]
         ytl = max(points, key= lambda x: x[1])[1]
@@ -472,32 +471,33 @@ class FeaturesExtractor(object):
          
         return frame
     
-    def getLandmarks(self, frame, display = False, color = (0,255,0), thickness = 2, to_show = ['face_box', 'eyes_lm', 'eyes_boxes', 'axes']):
+    def getLandmarks(self, frame, display = False, color = (0,255,0), thickness = 2, to_show = ['face_box', 'eyes_lm', 'eyes_boxes', 'axes_eyes']):
         """
-            draws the face box, needed to find eye landmarks and returns the boxes
+            draws the selected features, get back the boxes and landmarks
             @ param frame: input image
-            @ to_show: vector containing the keywords to choose what to display on the frame, the values are: 'face_box', 'eyes_lm', 'eyes_boxes'
+            @ to_show: vector containing the keywords to choose what to display on the frame, the values are:
+            'face_box', 'eyes_lm', 'eyes_boxes','axes_eyes','yaw_face'
             
         """
         
         # define the output dictionary:
         output = {}
         
-        if frame.shape[2] != 1: # convert in grayscale
+        # convert in grayscale if needed
+        if len(frame.shape) == 3 and frame.shape[2] != 1: 
             frame_g = self.color2gray(frame)
         
+        # 1) extract the face and its box
         faces = self.face_extractor(frame_g)   # return an array with all the faces (box), ordered by confidence
         
         # if is not found any face, returns the original frame and None as the output
-        
+
         if len(faces) == 0:
-            return frame, None
+            return frame, None, None
         
         # take the most likely face
         face = faces[0]
         
-        # for face in faces:
-            
         # get the top-left and the bottom-right points 
         top_left_point      = (face.left(), face.top())
         bottom_right_point  = (face.right(), face.bottom())
@@ -507,11 +507,11 @@ class FeaturesExtractor(object):
 
         output['face_box'] = (top_left_point, bottom_right_point)
         
-        # computes the landmarks
+        # 2) computes the landmarks and get eyes box
         landmarks = self.faceLM_predictor(frame_g, face)  # returns an object detection object
         
-        left_eye_lm = []
         # draw for left eye
+        left_eye_lm = []
         for idx in range(self.landmarks_indices["left"][0], self.landmarks_indices["left"][1] +1):
             # get x and y landmark
             x = landmarks.part(idx).x
@@ -521,9 +521,9 @@ class FeaturesExtractor(object):
             # draw it
             if "eyes_lm" in to_show: cv2.circle(frame, (x,y), radius= 1, color = (0,255,0))
         
-        right_eye_lm = []
         
         # draw for right eye
+        right_eye_lm = []
         for idx in range(self.landmarks_indices["right"][0], self.landmarks_indices["right"][1] +1):
             # get x and y landmark
             x = landmarks.part(idx).x
@@ -536,12 +536,14 @@ class FeaturesExtractor(object):
         output['left_eye_lm']   = left_eye_lm
         output['right_eye_lm']  = right_eye_lm
         
-        if 'axes' in to_show:
+        # get eyes' axes
+        if 'axes_eyes' in to_show:
             self.compute_horizontalAxis(landmarks, is_left= True, frame= frame)
             self.compute_horizontalAxis(landmarks, is_left= False, frame= frame)
             self.compute_verticalAxis(landmarks, is_left= True, frame= frame)
             self.compute_verticalAxis(landmarks, is_left= False, frame= frame)
         
+        # get eyes boxes
         if "eyes_boxes" in to_show:
             box_left_eye  = self.getEyes(landmarks, is_left= True, frame= frame)            # to avoid the showing of the boss, not pass the frame
             box_right_eye  = self.getEyes(landmarks, is_left= False, frame= frame)
@@ -549,15 +551,15 @@ class FeaturesExtractor(object):
             box_left_eye  = self.getEyes(landmarks, is_left= True)            # to avoid the showing of the boss, not pass the frame
             box_right_eye  = self.getEyes(landmarks, is_left= False)
         
-        
+        # store in the output
         output['left_eye_box']  = box_left_eye
         output['right_eye_box'] = box_right_eye
         
-        if display:
+        if display:  # usually the frame is not showed from this function
             cv2.imshow("image", frame)
             cv2.waitKey(0)
-         
-        return frame, output
+        
+        return frame, output, landmarks
         
         
 # ---------------------------------------------------------------------------------------- test features extractors
@@ -624,14 +626,15 @@ def test_LMDetection(features_extractor: FeaturesExtractor):
             print('Test ended from user input')
             break
         
-        frame, out = features_extractor.getLandmarks(img, to_show = ["face_box",'eyes_boxes', 'axes'])
+        frame, out = features_extractor.getLandmarks(img, to_show = ["face_box",'eyes_boxes', 'axes_eyes'])
         print(out)
 
         cv2.imshow("image", frame)
         cv2.waitKey(0)
 
     
-if __name__ == "__main__":  
+if __name__ == "__main__":
+    pass
     # face_extractor = Haar_faceExtractor(verbose = True)
     # eye_extractor = Haar_eyesDectector(verbose =  True)
     # test_extractors(face_extractor, eye_extractor)
@@ -641,5 +644,5 @@ if __name__ == "__main__":
     # test_getFaces(face_extractor)
 
 
-    ext = FeaturesExtractor()
-    test_LMDetection(ext)
+    # ext = FeaturesExtractor()
+    # test_LMDetection(ext)
