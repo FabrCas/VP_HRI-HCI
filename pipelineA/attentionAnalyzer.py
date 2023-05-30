@@ -1,6 +1,7 @@
 
 import math
 import cv2 
+import numpy as np
 # import features detectors
 try:
     from pipelineA.featuresExtractors import FeaturesExtractor
@@ -33,7 +34,8 @@ class AttentionAnalyzer():
             return new_frame
         
         # call analyzer functions
-        angle = self.getFaceAlignment(frame, lm, to_show)
+        # angle, new_frame = self.getFaceAlignment(frame, lm, to_show)
+        new_frame = self.getGazeDirection(new_frame, out, lm, to_show)
         
         
         
@@ -99,12 +101,93 @@ class AttentionAnalyzer():
             cv2.line(img = frame, pt1 = (midpoint_x, midpoint_y), pt2 = (midpoint_x + d_proj[0], midpoint_y + d_proj[1]), color = (255,255,255), thickness=1)
             cv2.circle(frame, (nose_tip_proj[0], nose_tip_proj[1]), radius= 3, color = (255,255,255))
             
-        return yaw_angle_proj
+        return yaw_angle_proj, frame
+
+
+    def getWhiteRatio(self, frame, eye_lm, eye_box, name, color = (0, 255, 0), thickness = 1, debug = True):
+        
+        original_frame_gray = np.copy(frame)
+        original_frame_gray = cv2.cvtColor(original_frame_gray, cv2.COLOR_BGR2GRAY)
+        
+        
+        # 1) we extract the eye drawing a polygon containing iris, sclera and pupil
+        eye_points = np.array(eye_lm, dtype= np.int32)
+
+        # 2) create the mask to isolte just the eye pixels
+        mask = np.zeros(frame.shape[:2], dtype= np.uint8)       # define the empty matrix representing the mask
+        # draw the eye polygon
+        cv2.polylines(mask, np.int32([eye_points]), True, color = 255, thickness= 2) # one channel image, so i choose the maximum white as color
+        # fill the polygon area
+        cv2.fillPoly(mask, [eye_points], color = 255)
+        # apply the mask to the gray original frame
+        masked_frame = cv2.bitwise_and(original_frame_gray, mask)
+        
+        
+        # 3) extract the left eye patch & segment
+        eye_patch_masked = masked_frame[eye_box[1][1]:eye_box[0][1], eye_box[0][0]: eye_box[1][0]:]
+        # resize the patch
+        eye_patch_masked = cv2.resize(eye_patch_masked, None, fx = 5, fy= 5)
+        # thresholding using binary segmenting
+        # _, left_eye_patch_gray_thr = cv2.threshold(left_eye_patch, 60, 255, cv2.THRESH_BINARY)  #thrshold value 70
+        _, eye_patch_masked_thr = cv2.threshold(eye_patch_masked, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)
+        
+        # define left and right threshold
+        left_patch_thr    = eye_patch_masked_thr[0: eye_patch_masked_thr.shape[0], 0: int(eye_patch_masked_thr.shape[1]/2)]
+        right_patch_thr   = eye_patch_masked_thr[0: eye_patch_masked_thr.shape[0], int(eye_patch_masked_thr.shape[1]/2): eye_patch_masked_thr.shape[1]]
+        
+        # determine the gaze direction looking at the distribution of white pixels 
+        le_left_white_pixels = cv2.countNonZero(left_patch_thr)
+        le_right_white_pixels = cv2.countNonZero(right_patch_thr)
+        
+        
+        
+        
+        # show section
+        if debug: 
+            cv2.polylines(frame, ([eye_points]), True, color = (0,255,0), thickness= thickness)
+            
+            if name == "left eye":
+                cv2.putText(frame, "left  white sx:" + str(le_left_white_pixels), (350,20), fontFace= cv2.FONT_HERSHEY_DUPLEX, fontScale = 0.8, color= (255,255,255), thickness= 1)
+                cv2.putText(frame, "left  white rx:" + str(le_right_white_pixels), (350,40), fontFace= cv2.FONT_HERSHEY_DUPLEX, fontScale = 0.8, color= (255,255,255), thickness= 1)
+            elif name == "right eye":
+                cv2.putText(frame, "right white sx:" + str(le_left_white_pixels), (350,60), fontFace= cv2.FONT_HERSHEY_DUPLEX, fontScale = 0.8, color= (255,255,255), thickness= 1)
+                cv2.putText(frame, "right white rx:" + str(le_right_white_pixels), (350,80), fontFace= cv2.FONT_HERSHEY_DUPLEX, fontScale = 0.8, color= (255,255,255), thickness= 1)
+
+            # print the thresholds
+            # cv2.imshow('{} threshold'.format(name), eye_patch_masked_thr)
+            # cv2.imshow('{} threshold left'.format(name), left_patch_thr)
+            # cv2.imshow('{} threshold right'.format(name), right_patch_thr)
+            
+        return le_left_white_pixels, le_right_white_pixels
+
+    def getGazeDirection(self, frame, out, to_show, color = (0, 255, 0), thickness = 1, debug = True):
+        
+        # get a copy of the original frame
+        original_frame = np.copy(frame)
+        
+        # compute the white pixel distribution ratio after applying a mask and segmenting
+        le_left_white_pixels, le_right_white_pixels = self.getWhiteRatio(frame, out['left_eye_lm'],  out['left_eye_box'],  name = "left eye", color = color, thickness = thickness,   debug = True)
+        re_left_white_pixels, re_right_white_pixels = self.getWhiteRatio(frame, out['right_eye_lm'], out['right_eye_box'], name = "right eye",color = color, thickness = thickness,   debug = True)
+        
+        
+        if le_right_white_pixels == 0:
+            ratio = -1
+        else:
+            ratio_white_pixels = le_left_white_pixels/le_right_white_pixels  # ideally, center is around 1, if <1 looking to the left and if >1 to the right
+        
+
+            
+        
+        
+        # same for right eye
+        
 
         
-    
-    def getGaze(self):
-        pass
+        
+        
+        
+        
+        return frame
 
 if __name__ == "__main__":  
     analyzer = AttentionAnalyzer()

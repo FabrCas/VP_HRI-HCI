@@ -475,9 +475,11 @@ class FeaturesExtractor(object):
         """
             draws the selected features, get back the boxes and landmarks
             @ param frame: input image
-            @ to_show: vector containing the keywords to choose what to display on the frame, the values are:
+            @ param to_show: vector containing the keywords to choose what to display on the frame, the values are:
             'face_box', 'eyes_lm', 'eyes_boxes','axes_eyes','yaw_face'
-            
+            @ return new_frame: the new frame with optional UI
+            @ return output: the out dictionary with the following keys: 'face_box', 'left_eye_lm', 'right_eye_lm', 'left_eye_box', 'right_eye_box'
+            @ return landmarks:  complete list of landmarks extracte
         """
         
         # define the output dictionary:

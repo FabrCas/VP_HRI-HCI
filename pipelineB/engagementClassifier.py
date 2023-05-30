@@ -364,7 +364,7 @@ class EngagementClassifier(nn.Module):
                         
                 
                 # print info and plot of loss for the current epoch  
-                self.plot_loss(loss_array= loss_steps, epoch= str(epoch_index +1), duration_timer = 3000)  
+                # self.plot_loss(loss_array= loss_steps, epoch= str(epoch_index +1), duration_timer = 1500)  
                 print(f"Avg loss for the epoch -> {loss_epoch/len(train_dataloader)}")
                 loss_epochs.append(loss_epoch/len(train_dataloader))
                 
@@ -729,7 +729,7 @@ if __name__ == "__main__":
     pass  
     # test_forward_2DNet()
     # test_forward_3DNet()
-    test_training()
+    # test_training()
     # test_validation()
     # test_forward()
     # test_sampler()
@@ -769,9 +769,23 @@ def train_5():
     # v3 time learning 33 minutes per epoch
     # v1 time learning 4h per epoch
     
+def train_6():
+    classifier = EngagementClassifier(batch_size= 16, version_dataset= 'v2', grayscale= False, depth_level= 0)
+    classifier.n_epochs = 100
+    classifier.patience = 100
+    classifier.train(name_model= "train_v2_batch16_color_depth0_epochs100", save_model= True, verbose= False)  
+
+def train_6():
+    classifier = EngagementClassifier(batch_size= 32, version_dataset= 'v4', grayscale= True, depth_level= 0)
+    classifier.n_epochs = 100
+    classifier.patience = 100
+    classifier.train(name_model= "train_v4_batch32_gray_depth0_epochs100", save_model= True, verbose= False) 
+
+   
 if __name__ == "__main__":  
     pass
     # train_5()
+    train_6()
     # test_testing(name="train_v3_batch2_gray_depth0_epochs5_27-05-2023", epoch = 5, grayscale= True, batch_size= 2)
 
 
