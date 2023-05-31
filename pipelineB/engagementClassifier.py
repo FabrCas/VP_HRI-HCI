@@ -769,23 +769,40 @@ def train_5():
     # v3 time learning 33 minutes per epoch
     # v1 time learning 4h per epoch
     
-def train_6():
+def train_6(): # to test
     classifier = EngagementClassifier(batch_size= 16, version_dataset= 'v2', grayscale= False, depth_level= 0)
     classifier.n_epochs = 100
     classifier.patience = 100
     classifier.train(name_model= "train_v2_batch16_color_depth0_epochs100", save_model= True, verbose= False)  
 
-def train_6():
-    classifier = EngagementClassifier(batch_size= 32, version_dataset= 'v4', grayscale= True, depth_level= 0)
-    classifier.n_epochs = 100
-    classifier.patience = 100
-    classifier.train(name_model= "train_v4_batch32_gray_depth0_epochs100", save_model= True, verbose= False) 
 
-   
+def train_7(): # to test
+    classifier = EngagementClassifier(batch_size= 32, version_dataset= 'v4', grayscale= True, depth_level= 0)
+    classifier.n_epochs = 20
+    classifier.patience = 20
+    classifier.train(name_model= "train_v4_batch32_gray_depth0_epochs20", save_model= True, verbose= False) 
+
+def train_8(): # to test
+    classifier = EngagementClassifier(batch_size= 32, version_dataset= 'v2', grayscale= True, depth_level= 0)
+    classifier.n_epochs = 20
+    classifier.patience = 20
+    classifier.train(name_model= "train_v2_batch32_gray_depth0_epochs20", save_model= True, verbose= False) 
+
+def train_9(): # to test
+    classifier = EngagementClassifier(batch_size= 16, version_dataset= 'v4', grayscale= True, depth_level= 0)
+    classifier.n_epochs = 100
+    classifier.patience = 30
+    classifier.train(name_model= "train_v4_batch16_gray_depth0_epochs100_patience30", save_model= True, verbose= False) 
+
+def train_10(): # to test
+    classifier = EngagementClassifier(batch_size= 16, version_dataset= 'v2', grayscale= True, depth_level= 0)
+    classifier.n_epochs = 100
+    classifier.patience = 30
+    classifier.train(name_model= "train_v2_batch16_gray_depth0_epochs100_patience30", save_model= True, verbose= False) 
+    
 if __name__ == "__main__":  
     pass
-    # train_5()
-    train_6()
+    train_10()
     # test_testing(name="train_v3_batch2_gray_depth0_epochs5_27-05-2023", epoch = 5, grayscale= True, batch_size= 2)
 
 

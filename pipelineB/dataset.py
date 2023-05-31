@@ -95,9 +95,14 @@ class CustomDaisee(Dataset):
             
             # sometimes last frame is None
             if frame is not None:
+                    # print(frame.shape)
+                    # print(frame)
                 
-                if self.grayscale and (len(frame.shape) == 2 or frame.shape[2]==1):   # look if it's needed, i.e. v4 doesn't need
+                
+                # if self.grayscale and (len(frame.shape) == 2 or frame.shape[2]==1):   # look if it's needed, i.e. v4 doesn't need
+                if self.grayscale or self.version == 'v4':
                     frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                    # frame = cv2.equalizeHist(frame)                     # compute histo equalization
                 else:
                     # from BGR to RGB if requested
                     if read_RGB:
@@ -123,13 +128,13 @@ class CustomDaisee(Dataset):
         
         if video.shape[0] > 300:
             video = video[:300]
-            
+        
         elif video.shape[0] < 300:  # padding with a zero frames, just one is needed and will be skipped durinh the sampling in the classifier
             n_padding = 300 - video.shape[0]
             zero_vector = T.zeros(1, video.shape[1], video.shape[2], video.shape[3])
             for i in range(n_padding):
-                # Concatenate the zero vector along dimension 0
-                video = T.cat([zero_vector, video], dim=0)
+                 # Concatenate the zero vector along dimension 0 in the last position
+                video = T.cat([video, zero_vector], dim=0) 
                   
         return video
      
@@ -154,8 +159,12 @@ class CustomDaisee(Dataset):
         
         if show: 
             # remember matplotib expect an image with the RGB convention! otherwise the colors are altered
-            plt.imshow(frames[0].permute(1,2,0))
-            plt.show()
+            try:
+                plt.imshow(frames[0].permute(1,2,0).numpy())
+                plt.show()
+            except:
+                plt.imshow(frames[0].permute(1,2,0))
+                plt.show()
 
         # Return the video and its label as a dictionary
         # sample = {'frames': frames, 'label': label, 'timestamps': timestamps, 'label_description': label_description}
@@ -1050,6 +1059,7 @@ class Dataset(object):
         print(type(data_laoder))
         for idx, data in enumerate(data_laoder):       
             # unpack data
+            
             video               = T.squeeze(data[0], dim= 0)  # remove batch dimension
             label               = T.squeeze(data[1], dim = 0)
             # timestamps          = T.squeeze(data[2], dim=0)
@@ -1073,12 +1083,17 @@ class Dataset(object):
             # show first frame and its dimension 
             for frame in video:
                 
-                print(frame.shape)
+                # print(frame.shape)
+                # print(frame)
                 
                 if show_frames: 
                     # using matplotlib, it expects RGB channels, so the image is alterated 
                     frame = frame.permute(1,2,0) # re-ordering dimensions to show
-                    plt.imshow(frame)
+                    # frame = cv2.equalizeHist(frame)
+                    if frame.shape[2] == 3:
+                         plt.imshow(frame)
+                    else:
+                        plt.imshow(frame, cmap= 'gray')
                     print(frame.shape)
                     plt.show()
                     break
@@ -1103,8 +1118,8 @@ def test_fetch_speed(dataloader = None):
     print("\nTime elapsed {}".format(t_time))
 
 if __name__ == "__main__":  
-    dataset = Dataset(batch_size=1, version='v4')
-    # dataset.print_loaderCustomDaisee(dataset.get_trainSet())
+    dataset = Dataset(batch_size=1, version='v2', grayscale= True)
+    dataset.print_loaderCustomDaisee(dataset.get_validationSet())
 
     # freq, distr = dataset.balanceLabels(type_ds="validation", verbose= True)
     # print(freq)

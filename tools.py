@@ -1,6 +1,7 @@
 import cv2
 import os
 import re
+import screeninfo
 import math
 import time
 import numpy as np
@@ -10,7 +11,7 @@ from pipelineA.attentionAnalyzer import AttentionAnalyzer
 
 
 class WebcamReader(object):
-    def __init__(self, frame_rate = 15, resolution = 480):
+    def __init__(self, frame_rate = 15, resolution = 720):
         super().__init__()
         self.frame_rate = frame_rate
         self.resolution = resolution                        # higher resolution can automatically reduces the fps since usb port has a limited bandwidth
@@ -138,6 +139,10 @@ class WebcamReader(object):
             # Read a frame from the video capture object
             ret, frame = self.capturer.read()    # BGR channels format 
             
+            if frame is None: continue
+            
+            frame = cv2.flip(frame, flipCode= 1)
+            
             if not(ret):
                 print("Missing frame...")
             else:
@@ -182,8 +187,12 @@ class WebcamReader(object):
             # Read a frame from the video capture object
             ret, frame = self.capturer.read()    # BGR channels format
             
+            if frame is None: continue
+            
+            frame = cv2.flip(frame, flipCode= 1)
+            
             frame, _ = face_extractor.drawFace(frame, display= False)
-                        
+        
             if not(ret):
                 print("Missing frame...")
             else:
@@ -224,6 +233,8 @@ class WebcamReader(object):
             
             if frame is None: continue
             
+            frame = cv2.flip(frame, flipCode= 1)
+            
             frame, _, _  = feature_extractor.getLandmarks(frame, display= False, to_show=['face_box', 'eyes_lm', 'axes_eyes', 'yaw_face', 'debug_yaw'])
                
             if not(ret):
@@ -254,10 +265,24 @@ class WebcamReader(object):
                 
         self._close()
         
-    def showAnalyzer(self):
+    def showAnalyzer(self, monitor_idx = 1, resolution_window = (1280,720)):
         self._open()
         
         analyzer = AttentionAnalyzer()
+        
+        screens = screeninfo.get_monitors()
+        x_window = 0
+        for idx, screen in enumerate(screens):
+            if idx == monitor_idx:
+                x_window += ((screen.width/2) - (resolution_window[0]/2))
+            else:
+                x_window += screen.width
+                
+        x_window = int(x_window)
+        y_window = int((screens[monitor_idx].height/2) - (resolution_window[1]/2))
+        
+        cv2.namedWindow("Webcam")        # Create a named window
+        cv2.moveWindow("Webcam", x_window,y_window)  # Move it to (40,30)
         
         # Loop through frames until the user exits
         while True:
@@ -267,7 +292,7 @@ class WebcamReader(object):
             # flip frame
             frame = cv2.flip(frame, flipCode= 1)
             
-            frame = analyzer.forward(frame, to_show=['face_box', 'yaw_face', 'debug_yaw'])
+            frame = analyzer.forward(frame, to_show=['face_box', 'orientation_face', "gaze analytics"])
                
             if not(ret):
                 print("Missing frame...")
@@ -505,7 +530,8 @@ def test_plotter():
         
 
 if __name__ == "__main__":
-    webcam = WebcamReader(frame_rate=15, resolution= 480)
+    webcam = WebcamReader(frame_rate=15, resolution= 720)
+    # webcam.show()
     # webcam.showFaceCNN()
     webcam.showAnalyzer()
     

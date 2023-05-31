@@ -22,7 +22,7 @@ class AttentionAnalyzer():
     def forward(self, frame, to_show = None):
         """
             @ to_show: vector containing the keywords to choose what to display on the frame, the values are:
-            'face_box', 'eyes_lm', 'eyes_boxes','axes_eyes','yaw_face', 'debug_yaw'
+            'face_box', 'eyes_lm', 'eyes_boxes','axes_eyes','orientation_face', 'debug_orientation'
         """
         
         if to_show is None:
@@ -34,14 +34,13 @@ class AttentionAnalyzer():
             return new_frame
         
         # call analyzer functions
-        # angle, new_frame = self.getFaceAlignment(frame, lm, to_show)
-        new_frame = self.getGazeDirection(new_frame, out, lm, to_show)
-        
+        # angle_yaw, new_frame = self.getFaceOrientation(frame, lm, out, to_show)
+        new_frame = self.getGazeDirection(new_frame, out,to_show = to_show)
         
         
         return new_frame
         
-    def getFaceAlignment(self, frame, landmarks, to_show = ['yaw_face', 'debug_yaw'], color = (0,255,0)):
+    def getFaceOrientation(self, frame, landmarks, out, to_show = ['yaw_face', 'debug_yaw'], color = (0,255,0), pitch_estimation = False):
         """
             compute the face alignement from landmarks
         """
@@ -51,8 +50,10 @@ class AttentionAnalyzer():
         left_eye    = (landmarks.part(36).x, landmarks.part(36).y)
         right_eye   = (landmarks.part(45).x, landmarks.part(45).y)
         nose_tip    = (landmarks.part(30).x, landmarks.part(30).y)
+        chin        = (landmarks.part(8).x , landmarks.part(8).y )
         
-        # Calculate the yaw angle with simple trigonoemtry, first compute vector from midpoint eyes to nose tip, then get the angle
+        #                           [Yaw angle using also the roll angle]
+        # Calculate the yaw angle with trigonoemtry, first compute vector from midpoint eyes to nose tip, then get the angle
         midpoint_x = int((left_eye[0] + right_eye[0]) / 2)
         midpoint_y = int((left_eye[1] + right_eye[1]) / 2)
         dx = nose_tip[0] - midpoint_x
@@ -77,14 +78,25 @@ class AttentionAnalyzer():
         nose_tip_proj = (midpoint_x + d_proj[0], midpoint_y + d_proj[1])
     
         # compute both yaw angles and show the difference if debug otherwise use the projected one
-        yaw_angle_proj= math.degrees(math.atan2(d_proj[1], d_proj[0]))
-        yaw_angle = math.degrees(math.atan2(dy, dx))
+        
+        # the yaw angle of the eyes-midpoint and nose project from the roll angle
+        yaw_angle_proj= math.degrees(math.atan2(d_proj[1], d_proj[0])) -90
+        yaw_angle = math.degrees(math.atan2(dy, dx)) -90
+        
+        
+        if pitch_estimation:
+            #                                [Pitch angle]
+            # get face top
+            face_top = out['face_box'][0][1]
+            # Calculate the pitch angle
+            pitch_angle = math.degrees(math.asin((chin[1] - nose_tip[1]) / (chin[1] - face_top))) -30
         
         # Draw the yaw angle
-        if "yaw_face" in to_show and not 'debug_yaw' in to_show:
+        if "orientation_face" in to_show and not 'debug_yaw' in to_show:
             cv2.putText(frame, f"Yaw Angle' : {yaw_angle_proj:.2f}", (20, 20), cv2.FONT_HERSHEY_DUPLEX, 0.5, (255, 255, 255), 1)
+            if pitch_estimation: cv2.putText(frame, f"Pitch Angle' : {pitch_angle:.2f}", (20, 40), cv2.FONT_HERSHEY_DUPLEX, 0.5, (255, 255, 255), 1)
             
-        elif 'debug_yaw' in to_show: 
+        elif 'debug_orientation' in to_show: 
             # show text
             cv2.putText(frame, f"Alpha Angle: {alpha_angle:.2f}", (10, 30), cv2.FONT_HERSHEY_DUPLEX, 0.8, (255, 255, 255), 2)
             cv2.putText(frame, f"Beta Angle : {beta_angle:.2f}",(10, 70), cv2.FONT_HERSHEY_DUPLEX, 0.8, (255, 255, 255), 2)
@@ -102,7 +114,6 @@ class AttentionAnalyzer():
             cv2.circle(frame, (nose_tip_proj[0], nose_tip_proj[1]), radius= 3, color = (255,255,255))
             
         return yaw_angle_proj, frame
-
 
     def getWhiteRatio(self, frame, eye_lm, eye_box, name, color = (0, 255, 0), thickness = 1, debug = True):
         
@@ -134,60 +145,125 @@ class AttentionAnalyzer():
         # define left and right threshold
         left_patch_thr    = eye_patch_masked_thr[0: eye_patch_masked_thr.shape[0], 0: int(eye_patch_masked_thr.shape[1]/2)]
         right_patch_thr   = eye_patch_masked_thr[0: eye_patch_masked_thr.shape[0], int(eye_patch_masked_thr.shape[1]/2): eye_patch_masked_thr.shape[1]]
-        
+        up_patch_thr      = eye_patch_masked_thr[0: int(eye_patch_masked_thr.shape[0]/2), 0: eye_patch_masked_thr.shape[1]]
+        down_patch_thr    = eye_patch_masked_thr[int(eye_patch_masked_thr.shape[0]/2): eye_patch_masked_thr.shape[0], 0: eye_patch_masked_thr.shape[1]]
         # determine the gaze direction looking at the distribution of white pixels 
-        le_left_white_pixels = cv2.countNonZero(left_patch_thr)
-        le_right_white_pixels = cv2.countNonZero(right_patch_thr)
         
-        
-        
+        left_white_pixels = cv2.countNonZero(left_patch_thr)
+        right_white_pixels = cv2.countNonZero(right_patch_thr)
+        up_white_pixels = cv2.countNonZero(up_patch_thr)
+        down_white_pixels = cv2.countNonZero(down_patch_thr)
         
         # show section
         if debug: 
             cv2.polylines(frame, ([eye_points]), True, color = (0,255,0), thickness= thickness)
             
             if name == "left eye":
-                cv2.putText(frame, "left  white sx:" + str(le_left_white_pixels), (350,20), fontFace= cv2.FONT_HERSHEY_DUPLEX, fontScale = 0.8, color= (255,255,255), thickness= 1)
-                cv2.putText(frame, "left  white rx:" + str(le_right_white_pixels), (350,40), fontFace= cv2.FONT_HERSHEY_DUPLEX, fontScale = 0.8, color= (255,255,255), thickness= 1)
+                cv2.putText(frame, "left  white sx:" + str(left_white_pixels), (20,20), fontFace= cv2.FONT_HERSHEY_DUPLEX, fontScale = 0.8, color= (255,255,255), thickness= 1)
+                cv2.putText(frame, "left  white rx:" + str(right_white_pixels), (20,40), fontFace= cv2.FONT_HERSHEY_DUPLEX, fontScale = 0.8, color= (255,255,255), thickness= 1)
+                cv2.putText(frame, "left  white up:" + str(up_white_pixels), (20,60), fontFace= cv2.FONT_HERSHEY_DUPLEX, fontScale = 0.8, color= (255,255,255), thickness= 1)
+                cv2.putText(frame, "left  white dw:" + str(down_white_pixels), (20,80), fontFace= cv2.FONT_HERSHEY_DUPLEX, fontScale = 0.8, color= (255,255,255), thickness= 1)
             elif name == "right eye":
-                cv2.putText(frame, "right white sx:" + str(le_left_white_pixels), (350,60), fontFace= cv2.FONT_HERSHEY_DUPLEX, fontScale = 0.8, color= (255,255,255), thickness= 1)
-                cv2.putText(frame, "right white rx:" + str(le_right_white_pixels), (350,80), fontFace= cv2.FONT_HERSHEY_DUPLEX, fontScale = 0.8, color= (255,255,255), thickness= 1)
-
+                cv2.putText(frame, "right white sx:" + str(left_white_pixels), (20,640), fontFace= cv2.FONT_HERSHEY_DUPLEX, fontScale = 0.8, color= (255,255,255), thickness= 1)
+                cv2.putText(frame, "right white rx:" + str(right_white_pixels), (20,660), fontFace= cv2.FONT_HERSHEY_DUPLEX, fontScale = 0.8, color= (255,255,255), thickness= 1)
+                cv2.putText(frame, "right white up:" + str(up_white_pixels), (20,680), fontFace= cv2.FONT_HERSHEY_DUPLEX, fontScale = 0.8, color= (255,255,255), thickness= 1)
+                cv2.putText(frame, "right white dw:" + str(down_white_pixels), (20,700), fontFace= cv2.FONT_HERSHEY_DUPLEX, fontScale = 0.8, color= (255,255,255), thickness= 1)
+            
             # print the thresholds
             # cv2.imshow('{} threshold'.format(name), eye_patch_masked_thr)
             # cv2.imshow('{} threshold left'.format(name), left_patch_thr)
             # cv2.imshow('{} threshold right'.format(name), right_patch_thr)
+            # cv2.imshow('{} threshold up'.format(name), up_patch_thr)
+            # cv2.imshow('{} threshold down'.format(name), down_patch_thr)
             
-        return le_left_white_pixels, le_right_white_pixels
+        return left_white_pixels, right_white_pixels, up_white_pixels, down_white_pixels
 
-    def getGazeDirection(self, frame, out, to_show, color = (0, 255, 0), thickness = 1, debug = True):
+    def getGazeDirection(self, frame, out, to_show, mode_ratio = 'avg', color = (0, 255, 0), thickness = 1, debug = True):
         
         # get a copy of the original frame
-        original_frame = np.copy(frame)
+        # original_frame = np.copy(frame)
         
         # compute the white pixel distribution ratio after applying a mask and segmenting
-        le_left_white_pixels, le_right_white_pixels = self.getWhiteRatio(frame, out['left_eye_lm'],  out['left_eye_box'],  name = "left eye", color = color, thickness = thickness,   debug = True)
-        re_left_white_pixels, re_right_white_pixels = self.getWhiteRatio(frame, out['right_eye_lm'], out['right_eye_box'], name = "right eye",color = color, thickness = thickness,   debug = True)
+        le_left_white_pixels, le_right_white_pixels, le_up_white_pixels, le_down_white_pixels = self.getWhiteRatio(frame, out['left_eye_lm'],  out['left_eye_box'], name = "left eye", color = color, thickness = thickness,  debug = True)
         
+        re_left_white_pixels, re_right_white_pixels, re_up_white_pixels, re_down_white_pixels= self.getWhiteRatio(frame, out['right_eye_lm'], out['right_eye_box'], name = "right eye",color = color, thickness = thickness,  debug = True)
         
-        if le_right_white_pixels == 0:
-            ratio = -1
-        else:
-            ratio_white_pixels = le_left_white_pixels/le_right_white_pixels  # ideally, center is around 1, if <1 looking to the left and if >1 to the right
-        
-
+        # initialize the horizontal and vertical ratio with exception value 
+        ratioX_white_pixels = -1
+        ratioY_white_pixels = -1
+          
+        # compute the horizonatal  and vertical ratio
+        if mode_ratio == 'full':
+            left_white_pixels   = le_left_white_pixels  + re_left_white_pixels
+            right_white_pixels  = le_right_white_pixels + re_right_white_pixels
+            up_white_pixels     = le_up_white_pixels  + re_up_white_pixels
+            down_white_pixels   = le_down_white_pixels + re_down_white_pixels
             
+            # cv2.putText(frame, "white sx:" + str(left_white_pixels), (1050,20), fontFace= cv2.FONT_HERSHEY_DUPLEX, fontScale = 0.8, color= (255,255,255), thickness= 1)
+            # cv2.putText(frame, "white rx:" + str(right_white_pixels), (1050,40), fontFace= cv2.FONT_HERSHEY_DUPLEX, fontScale = 0.8, color= (255,255,255), thickness= 1)
         
-        
-        # same for right eye
-        
+            # x ratio
+            if right_white_pixels == 0:          # when face is no detected
+                ratioX_white_pixels = -1
+            else:
+                ratioX_white_pixels = left_white_pixels/right_white_pixels  # ideally, center is around 1, if <1 looking to the left and if >1 to the right
 
+            # y ratio
+            if down_white_pixels == 0:
+                ratioY_white_pixels = -1
+            else:
+                ratioY_white_pixels = up_white_pixels/down_white_pixels
+            
+            
+        elif mode_ratio == 'avg':
+            # x ratio
+            
+            if le_right_white_pixels == 0 or re_right_white_pixels == 0:    
+                ratioX_white_pixels = -1
+            else:
+                ratio_sx = le_left_white_pixels / le_right_white_pixels
+                ratio_dx = re_left_white_pixels / re_right_white_pixels
+                
+                ratioX_white_pixels = (ratio_sx + ratio_dx)/2  # ideally, center is around 1, if <1 looking to the left and if >1 to the right
+                
+            # y ratio
+            if le_down_white_pixels == 0 or re_down_white_pixels == 0:    
+                ratioY_white_pixels = -1
+            else:
+                ratio_sx = le_up_white_pixels / le_down_white_pixels
+                ratio_dx = re_up_white_pixels / re_down_white_pixels
+                
+                ratioY_white_pixels = (ratio_sx + ratio_dx)/2  # ideally, center is around 1, if <1 looking to the left and if >1 to the right
+            
+             
+        # round the values
+        ratioX_white_pixels = round(ratioX_white_pixels, 4)
+        ratioY_white_pixels = round(ratioY_white_pixels, 4)
         
-        
-        
-        
-        
-        return frame
+        if "gaze analytics" in to_show:
+            cv2.putText(frame, "ratioX:" + str(ratioX_white_pixels), (1050,20), fontFace= cv2.FONT_HERSHEY_DUPLEX, fontScale = 0.8, color= (255,255,255), thickness= 1)
+            cv2.putText(frame, "ratioy:" + str(ratioY_white_pixels), (1050,80), fontFace= cv2.FONT_HERSHEY_DUPLEX, fontScale = 0.8, color= (255,255,255), thickness= 1)
+            
+            
+            # ATTENTION: if the frame is not flipped the relation should be inverted! since the distribution behaves in a reflected way
+            # compute direction between central, left and right
+            if not (ratioX_white_pixels == -1):
+                if ratioX_white_pixels <=  0.7:
+                    cv2.putText(frame, "x: Left", (1050,50), fontFace= cv2.FONT_HERSHEY_DUPLEX, fontScale = 0.8, color= (255,255,255), thickness= 1)
+                elif 0.5 < ratioX_white_pixels < 1.3:
+                    cv2.putText(frame, "x: Center", (1050,50), fontFace= cv2.FONT_HERSHEY_DUPLEX, fontScale = 0.8, color= (255,255,255), thickness= 1)
+                else:
+                    cv2.putText(frame, "x: Right", (1050,50), fontFace= cv2.FONT_HERSHEY_DUPLEX, fontScale = 0.8, color= (255,255,255), thickness= 1)
+
+            if not (ratioY_white_pixels == -1):
+                if ratioY_white_pixels <=  0.4:
+                    cv2.putText(frame, "y: Up", (1050,110), fontFace= cv2.FONT_HERSHEY_DUPLEX, fontScale = 0.8, color= (255,255,255), thickness= 1)
+                elif 0.4 < ratioY_white_pixels < 0.9:
+                    cv2.putText(frame, "y: Center", (1050,110), fontFace= cv2.FONT_HERSHEY_DUPLEX, fontScale = 0.8, color= (255,255,255), thickness= 1)
+                else:
+                    cv2.putText(frame, "y: Down", (1050,110), fontFace= cv2.FONT_HERSHEY_DUPLEX, fontScale = 0.8, color= (255,255,255), thickness= 1)
+            
+        return frame, ratioX_white_pixels, ratioY_white_pixels
 
 if __name__ == "__main__":  
     analyzer = AttentionAnalyzer()
