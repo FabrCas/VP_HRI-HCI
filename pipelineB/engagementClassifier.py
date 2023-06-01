@@ -800,9 +800,20 @@ def train_10(): # to test
     classifier.patience = 30
     classifier.train(name_model= "train_v2_batch16_gray_depth0_epochs100_patience30", save_model= True, verbose= False) 
     
+def train_11(): # to test
+    classifier = EngagementClassifier(batch_size= 16, version_dataset= 'v2', grayscale= True, depth_level= 1)
+    classifier.n_epochs = 100
+    classifier.patience = 30
+    classifier.train(name_model= "train_v2_batch16_gray_depth1_epochs100_patience30", save_model= True, verbose= False)    
+
+def train_12(): # to test
+    classifier = EngagementClassifier(batch_size= 16, version_dataset= 'v2', grayscale= True, depth_level= 1)
+    classifier.n_epochs = 100
+    classifier.patience = 100
+    classifier.train(name_model= "train_v2_batch16_gray_depth1_epochs100", save_model= True, verbose= False)    
 if __name__ == "__main__":  
     pass
-    train_10()
+    train_12()
     # test_testing(name="train_v3_batch2_gray_depth0_epochs5_27-05-2023", epoch = 5, grayscale= True, batch_size= 2)
 
 

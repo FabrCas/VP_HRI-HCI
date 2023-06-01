@@ -265,7 +265,7 @@ class WebcamReader(object):
                 
         self._close()
         
-    def showAnalyzer(self, monitor_idx = 1, resolution_window = (1280,720)):
+    def showAnalyzer(self, scorer, plotter, monitor_idx = 1, resolution_window = (1280,720)):
         self._open()
         
         analyzer = AttentionAnalyzer()
@@ -289,10 +289,19 @@ class WebcamReader(object):
             # Read a frame from the video capture object
             ret, frame = self.capturer.read()    # BGR channels format
             
+            if frame is None: continue
+            
             # flip frame
             frame = cv2.flip(frame, flipCode= 1)
             
-            frame = analyzer.forward(frame, to_show=['face_box', 'orientation_face', "gaze analytics"])
+            # frame, ratioX, ratioY, angleY = analyzer.forward(frame, to_show=['face_box', 'orientation_face', "gaze analytics"])
+            frame, infoAnalysis  = analyzer.forward(frame, to_show=['face_box', 'orientation_face', "gaze analytics"])
+            
+            score = scorer.forward(infoAnalysis)
+            
+            frame = plotter.plot(frame, score)
+            
+            
                
             if not(ret):
                 print("Missing frame...")
@@ -386,27 +395,28 @@ class Plotter(object):
         
         self.resolution = resolution
         self._set_resolution()
-        self.plot_image = np.zeros((self.height, self.width, 3), dtype=np.uint8)
         self.color_rf = color_rf
         self.color_values = color_values
 
         # max number of values on screen
-        self.max_data_points = max_values
+        self.max_intervals = max_values
+        self.max_data_points = max_values + 1  # to have max_values intervals i neee max_values +1 data points 
         
         # set the margin on the screen
-        self.margin_y      = 50
+        self.margin_y      = 25
         self.margin_x      = 75
-        self.height_plot = int((self.height - (self.margin_y * 2))/3)           #height and width of just the plot, not the whole frame
+        self.height_plot = int((self.height - (self.margin_y * 2))/4)           #height and width of just the plot, not the whole frame
         self.width_plot  = self.width - (self.margin_x * 2)
         
         # initialize the values for the plot
         self._initialize_data()
         
-        # create the reference_frame
-        self._build_rf()
+        # create the data 
+        # self.plot_image = np.zeros((self.height, self.width, 3), dtype=np.uint8)
+        # self._build_rf()
 
         # start timer after creation
-        self.time_start = time.time()
+        # self.time_start = time.time()
 
     
     def _build_rf(self):
@@ -419,26 +429,40 @@ class Plotter(object):
         self.rf = cv2.line(self.rf, (self.margin_x, self.height - self.margin_y), (self.margin_x + self.width_plot, self.height - self.margin_y),
                       color= self.color_rf, thickness = 5)
         
-    
-    
+        
+    def _draw_rf(self, frame):
+        # vertical axis
+        self.rf = cv2.line(frame, (self.margin_x, self.height - self.margin_y), (self.margin_x, self.height - self.margin_y - self.height_plot),
+                      color= self.color_rf, thickness = 5)
+        
+        # horizonantal axis
+        self.rf = cv2.line(frame, (self.margin_x, self.height - self.margin_y), (self.margin_x + self.width_plot, self.height - self.margin_y),
+                      color= self.color_rf, thickness = 5)
+        
+        return frame
+        
     def _initialize_data(self):
         
-        # initialize empty list for x and y values
-        self.x_data = []
-        self.y_data = []
+
         
         # first values for x and y, and the starting one
         self.x = self.margin_x
         self.x_base = self.x
-        self.y = self.plot_image.shape[0] - self.margin_y
+        self.y = self.resolution - self.margin_y
         self.y_base = self.y
         
+        # initialize empty list for x and y values
+        self.x_data = [self.x_base]
+        self.y_data = [self.y_base]
+        
         # define the constant increment for the x axis
-        self.x_increment =  int(self.width_plot/self.max_data_points)
+        self.x_increment =  int(self.width_plot/self.max_intervals)
         
         # define the interval
         self.x_interval = (0, self.max_data_points)
         self.y_interval = (0,1)
+        
+        self.x_values = [self.x_base + i* self.x_increment for i in range(self.max_data_points)]
         
     
     def _set_resolution(self):
@@ -467,34 +491,98 @@ class Plotter(object):
         elif value < self.y_interval[0]: value = 0
         return value
         
+    def value2color(self, value):
         
+        print(value)
+        
+        if value < 0.1:
+            return (0,0, 255)
+        elif 0.1 <= value <= 0.3:
+            return  (0,128, 255)
+        elif 0.3 < value <= 0.7:
+            return  (0,255, 255)
+        else:
+            return (0,255,0)
+     
     def plot(self, frame, value, time_value = None):
+        """
+            value -> expected a normalized value between 0 and 1
+        """
+        # store the new data
         
         # clip value if necessary
-        value  = self._clip(value)
+        value_y  = self._clip(value)
+        
+        # compute the new y value and store
+        self.y = int(self.y_base - (value_y * self.height_plot))
+        self.y_data.append(self.y)
+        
+        # computes the next x value if necessary, if plot already filled use the defualt list of index
+        
+        if len(self.x_data) < self.max_data_points:
+            self.x =  self.x_values[len(self.x_data)]                           # max index is 100
+            self.x_data.append(self.x)
+        
+        else:
+            while(len(self.y_data) != self.max_data_points):
+                self.y_data.pop(0)                      # pop if max number of points has been reached
+                self.x_data = self.x_values
+            
+        frame = self._draw_rf(frame)
+        
+        # frame = cv2.line(frame, (self.x_base,  self.y_base), (self.x_base + self.width_plot, self.y_base - self.height_plot), color = (255,0,0), thickness = 3)
+        
+        for i in range(len(self.x_data) -1):            
+            # color = self.value2color( (-1*(self.y_data[i+1] - self.y_base))/self.height_plot )
+            # frame = cv2.line(frame, (self.x_data[i],  self.y_data[i]), (self.x_data[i+1],  self.y_data[i+1]), color = color, thickness = 3)
+            frame = cv2.line(frame, (self.x_data[i],  self.y_data[i]), (self.x_data[i+1],  self.y_data[i+1]), color = self.value2color(value), thickness = 3)
 
-        # store previous values for the plot
-        y_prev = self.y
-        x_prev = self.x
-        
-        self.x +=  self.x_increment
-        self.y = self.y_base - (value * self.height_plot)
-        
-        # Draw the plot line on the plot image
-        # update the plot
-        self.plot_image = cv2.line(self.plot_image, (x_prev, y_prev), (self.x, self.y), color = self.color_values, thickness = 5)
-        
-        # add plot to the current frame
-        # frame += self.plot_image
-        
-        output = self.rf + self.plot_image
-        # Display the plot image with the current frame
-        cv2.imshow("Real-Time Plot", output)
+        return frame
         
 class Scorer(object):
     
     def __init__(self):
-        super(Plotter).__init__()       
+        super(Plotter).__init__()
+        
+    def normalize(self, value):
+        """
+            functions that normalize to have a value between 0 and 100
+        """
+        pass
+    
+    def label2score(self, label):
+        if label == 0:
+            return 0.1
+        elif label == 1:
+            return 0.3
+        elif label == 2:
+            return 0.7
+        elif label == 3:
+            return 1.0
+        
+    def score2label(self, score):
+        dist = lambda x: abs(x - score)
+        
+        # the scores associated to the labels
+        scores = [0.1, 0.3, 0.7, 1.0]
+        dists = [dist(x) for x in scores]
+        label = np.argmin(dists)
+        return 
+        
+    def forward(self, infoAnalyzer):
+        """
+            infoAnalyzer a dictionary with the following keys:'ratioX', 'ratioY', 'angleYaw'
+        """
+        
+        # if no face has been detected, returns 0
+        if infoAnalyzer is None:
+            return 0
+
+        pass
+    
+        return infoAnalyzer['ratioX']
+        # gaze and face orientation part 
+            
       
       
 # ------------------- test functions
@@ -533,7 +621,9 @@ if __name__ == "__main__":
     webcam = WebcamReader(frame_rate=15, resolution= 720)
     # webcam.show()
     # webcam.showFaceCNN()
-    webcam.showAnalyzer()
+    scorer = Scorer()
+    plotter = Plotter()
+    webcam.showAnalyzer(scorer, plotter)
     
     
     

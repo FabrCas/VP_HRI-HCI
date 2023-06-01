@@ -18,7 +18,6 @@ class AttentionAnalyzer():
         self.show_analytics =  True
         
         
-        
     def forward(self, frame, to_show = None):
         """
             @ to_show: vector containing the keywords to choose what to display on the frame, the values are:
@@ -31,14 +30,16 @@ class AttentionAnalyzer():
             new_frame, out, lm = self.extractor.getLandmarks(frame, display= False, to_show= to_show)
         
         if lm is None:          # if no face detected i have not LMs
-            return new_frame
+            return new_frame, None
         
         # call analyzer functions
-        # angle_yaw, new_frame = self.getFaceOrientation(frame, lm, out, to_show)
-        new_frame = self.getGazeDirection(new_frame, out,to_show = to_show)
+        new_frame, angle_yaw = self.getFaceOrientation(frame, lm, out, to_show)
+        new_frame, ratioX, ratioY = self.getGazeDirection(new_frame, out,to_show = to_show)
         
         
-        return new_frame
+        info_analyzer = {'ratioX': ratioX, 'ratioY': ratioY, 'angleYaw': angle_yaw}
+        
+        return new_frame, info_analyzer
         
     def getFaceOrientation(self, frame, landmarks, out, to_show = ['yaw_face', 'debug_yaw'], color = (0,255,0), pitch_estimation = False):
         """
@@ -65,9 +66,6 @@ class AttentionAnalyzer():
         re_segment = (right_eye[0] - midpoint_x, right_eye[1] - midpoint_y)
         
         beta_angle = math.degrees(math.atan2(re_segment[1], re_segment[0])) - alpha_angle
-        
-        # reference line 
-        cv2.line(img = frame, pt1 = (midpoint_x -200, midpoint_y), pt2 = (midpoint_x +200, midpoint_y), color = (255,255,255), thickness=1)
         
         # compute the d magnitude        
         magnitude_d = math.hypot(dx, dy)
@@ -106,6 +104,9 @@ class AttentionAnalyzer():
             # show the eyes axis vector
             cv2.line(img = frame, pt1 = left_eye, pt2 = right_eye, color = color, thickness=1)
             
+            # reference line 
+            cv2.line(img = frame, pt1 = (midpoint_x -200, midpoint_y), pt2 = (midpoint_x +200, midpoint_y), color = (255,255,255), thickness=1)
+            
             # show vector alignment projected and not
             cv2.line(img = frame, pt1 = (midpoint_x, midpoint_y), pt2 = (midpoint_x + dx, midpoint_y + dy), color = color, thickness=1)
             cv2.circle(frame, (nose_tip[0], nose_tip[1]), radius= 3, color = color)
@@ -113,7 +114,7 @@ class AttentionAnalyzer():
             cv2.line(img = frame, pt1 = (midpoint_x, midpoint_y), pt2 = (midpoint_x + d_proj[0], midpoint_y + d_proj[1]), color = (255,255,255), thickness=1)
             cv2.circle(frame, (nose_tip_proj[0], nose_tip_proj[1]), radius= 3, color = (255,255,255))
             
-        return yaw_angle_proj, frame
+        return frame, yaw_angle_proj 
 
     def getWhiteRatio(self, frame, eye_lm, eye_box, name, color = (0, 255, 0), thickness = 1, debug = True):
         
@@ -184,9 +185,9 @@ class AttentionAnalyzer():
         # original_frame = np.copy(frame)
         
         # compute the white pixel distribution ratio after applying a mask and segmenting
-        le_left_white_pixels, le_right_white_pixels, le_up_white_pixels, le_down_white_pixels = self.getWhiteRatio(frame, out['left_eye_lm'],  out['left_eye_box'], name = "left eye", color = color, thickness = thickness,  debug = True)
+        le_left_white_pixels, le_right_white_pixels, le_up_white_pixels, le_down_white_pixels = self.getWhiteRatio(frame, out['left_eye_lm'],  out['left_eye_box'], name = "left eye", color = color, thickness = thickness,  debug = False)
         
-        re_left_white_pixels, re_right_white_pixels, re_up_white_pixels, re_down_white_pixels= self.getWhiteRatio(frame, out['right_eye_lm'], out['right_eye_box'], name = "right eye",color = color, thickness = thickness,  debug = True)
+        re_left_white_pixels, re_right_white_pixels, re_up_white_pixels, re_down_white_pixels= self.getWhiteRatio(frame, out['right_eye_lm'], out['right_eye_box'], name = "right eye",color = color, thickness = thickness,  debug = False)
         
         # initialize the horizontal and vertical ratio with exception value 
         ratioX_white_pixels = -1
@@ -240,6 +241,12 @@ class AttentionAnalyzer():
         ratioX_white_pixels = round(ratioX_white_pixels, 4)
         ratioY_white_pixels = round(ratioY_white_pixels, 4)
         
+        # define the limits
+        limit_up = 0.25
+        limit_down = 1
+        limit_left = 0.2
+        limit_right = 10
+        
         if "gaze analytics" in to_show:
             cv2.putText(frame, "ratioX:" + str(ratioX_white_pixels), (1050,20), fontFace= cv2.FONT_HERSHEY_DUPLEX, fontScale = 0.8, color= (255,255,255), thickness= 1)
             cv2.putText(frame, "ratioy:" + str(ratioY_white_pixels), (1050,80), fontFace= cv2.FONT_HERSHEY_DUPLEX, fontScale = 0.8, color= (255,255,255), thickness= 1)
@@ -248,17 +255,17 @@ class AttentionAnalyzer():
             # ATTENTION: if the frame is not flipped the relation should be inverted! since the distribution behaves in a reflected way
             # compute direction between central, left and right
             if not (ratioX_white_pixels == -1):
-                if ratioX_white_pixels <=  0.7:
+                if ratioX_white_pixels <=  limit_left:
                     cv2.putText(frame, "x: Left", (1050,50), fontFace= cv2.FONT_HERSHEY_DUPLEX, fontScale = 0.8, color= (255,255,255), thickness= 1)
-                elif 0.5 < ratioX_white_pixels < 1.3:
+                elif limit_left < ratioX_white_pixels < limit_right:
                     cv2.putText(frame, "x: Center", (1050,50), fontFace= cv2.FONT_HERSHEY_DUPLEX, fontScale = 0.8, color= (255,255,255), thickness= 1)
                 else:
                     cv2.putText(frame, "x: Right", (1050,50), fontFace= cv2.FONT_HERSHEY_DUPLEX, fontScale = 0.8, color= (255,255,255), thickness= 1)
 
             if not (ratioY_white_pixels == -1):
-                if ratioY_white_pixels <=  0.4:
+                if ratioY_white_pixels <=  limit_up:
                     cv2.putText(frame, "y: Up", (1050,110), fontFace= cv2.FONT_HERSHEY_DUPLEX, fontScale = 0.8, color= (255,255,255), thickness= 1)
-                elif 0.4 < ratioY_white_pixels < 0.9:
+                elif limit_up < ratioY_white_pixels < limit_down:
                     cv2.putText(frame, "y: Center", (1050,110), fontFace= cv2.FONT_HERSHEY_DUPLEX, fontScale = 0.8, color= (255,255,255), thickness= 1)
                 else:
                     cv2.putText(frame, "y: Down", (1050,110), fontFace= cv2.FONT_HERSHEY_DUPLEX, fontScale = 0.8, color= (255,255,255), thickness= 1)
