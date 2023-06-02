@@ -1126,3 +1126,43 @@ if __name__ == "__main__":
     # print(distr)
     # test_fetch_speed(dataloader)
 
+
+
+"""
+class frequency: -> {0: 34, 1: 214, 2: 2649, 3: 2585}
+minimum frequency -> (0, 34)
+maximum frequency -> (2, 2649)
+lenght indices: 34 214 2649 2585
+n_sample for 0 -> 34
+n_sample for 1 -> 51
+n_sample for 2 -> 342
+n_sample for 3 -> 341
+number of samples after the reduction:  768
+Saving validation set of dataset v2...
+
+lass frequency: -> {0: 23, 1: 160, 2: 912, 3: 625}
+minimum frequency -> (0, 23)
+maximum frequency -> (2, 912)
+lenght indices: 23 160 912 625
+n_sample for 0 -> 23
+n_sample for 1 -> 36
+n_sample for 2 -> 107
+n_sample for 3 -> 99
+number of samples after the reduction:  265
+Saving test set of dataset v2...
+
+class frequency: -> {0: 4, 1: 81, 2: 861, 3: 777}
+minimum frequency -> (0, 4)
+maximum frequency -> (2, 861)
+lenght indices: 4 81 861 777
+n_sample for 0 -> 4
+n_sample for 1 -> 19
+n_sample for 2 -> 107
+n_sample for 3 -> 106
+number of samples after the reduction:  236
+
+
+"""
+
+
+

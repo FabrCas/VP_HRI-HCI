@@ -297,12 +297,10 @@ class WebcamReader(object):
             # frame, ratioX, ratioY, angleY = analyzer.forward(frame, to_show=['face_box', 'orientation_face', "gaze analytics"])
             frame, infoAnalysis  = analyzer.forward(frame, to_show=['face_box', 'orientation_face', "gaze analytics"])
             
-            score = scorer.forward(infoAnalysis)
+            frame, score = scorer.forward(frame, infoAnalysis)
             
             frame = plotter.plot(frame, score)
             
-            
-               
             if not(ret):
                 print("Missing frame...")
             else:
@@ -410,14 +408,6 @@ class Plotter(object):
         
         # initialize the values for the plot
         self._initialize_data()
-        
-        # create the data 
-        # self.plot_image = np.zeros((self.height, self.width, 3), dtype=np.uint8)
-        # self._build_rf()
-
-        # start timer after creation
-        # self.time_start = time.time()
-
     
     def _build_rf(self):
         self.rf = np.zeros((self.height, self.width, 3), dtype=np.uint8)
@@ -492,9 +482,7 @@ class Plotter(object):
         return value
         
     def value2color(self, value):
-        
-        print(value)
-        
+
         if value < 0.1:
             return (0,0, 255)
         elif 0.1 <= value <= 0.3:
@@ -508,6 +496,12 @@ class Plotter(object):
         """
             value -> expected a normalized value between 0 and 1
         """
+        
+        if value is None:           # not enough frames to compute the value
+            frame = self._draw_rf(frame)
+            return frame
+            
+        
         # store the new data
         
         # clip value if necessary
@@ -529,9 +523,7 @@ class Plotter(object):
                 self.x_data = self.x_values
             
         frame = self._draw_rf(frame)
-        
-        # frame = cv2.line(frame, (self.x_base,  self.y_base), (self.x_base + self.width_plot, self.y_base - self.height_plot), color = (255,0,0), thickness = 3)
-        
+           
         for i in range(len(self.x_data) -1):            
             # color = self.value2color( (-1*(self.y_data[i+1] - self.y_base))/self.height_plot )
             # frame = cv2.line(frame, (self.x_data[i],  self.y_data[i]), (self.x_data[i+1],  self.y_data[i+1]), color = color, thickness = 3)
@@ -542,13 +534,20 @@ class Plotter(object):
 class Scorer(object):
     
     def __init__(self):
-        super(Plotter).__init__()
+        super(Plotter).__init__(model = None)
+        self.frames = []
+        # model from pipeline B
+        self.model
         
-    def normalize(self, value):
+    def normalize(self, value, min_value= 0, max_value=0.5):
         """
-            functions that normalize to have a value between 0 and 100
+            functions that normalize to have a value between 0 and 1
         """
-        pass
+        # min_value = 0
+        # max_value = 0.5
+        normalized_value = (value - min_value) / (max_value - min_value)
+        
+        return normalized_value
     
     def label2score(self, label):
         if label == 0:
@@ -568,20 +567,173 @@ class Scorer(object):
         dists = [dist(x) for x in scores]
         label = np.argmin(dists)
         return 
-        
-    def forward(self, infoAnalyzer):
-        """
-            infoAnalyzer a dictionary with the following keys:'ratioX', 'ratioY', 'angleYaw'
-        """
-        
-        # if no face has been detected, returns 0
-        if infoAnalyzer is None:
-            return 0
-
-        pass
     
-        return infoAnalyzer['ratioX']
-        # gaze and face orientation part 
+    def _centerBox(self, box):
+        return (int((box[0][0] + box[1][0])/2 ), int((box[0][1] + box[1][1])/2))
+    
+    def _centerFrame(self, frame):
+        return (int(frame.shape[1]/2), int(frame.shape[0]/2))
+      
+    def forward(self, frame, infoAnalyzer, alpha = 0.5, to_show = ['gaze analytics']):
+        """
+            infoAnalyzer a dictionary with the following keys:'ratioX', 'ratioY', 'angleYaw', 'limits', 'face_box'
+            all scalars except for limits, a dictionary with keys:'up', 'left', 'down', 'right'
+            and face_box a tuple with 2 points (tuple too) of left-top corner and bottom-right corner of the face box
+        """
+        # 1) if no face has been detected, returns 0
+        if infoAnalyzer is None:
+            return frame, 0
+        
+        #                                                   [score A]
+        face_box = infoAnalyzer['face_box']
+        # 2) store the faces in frames
+        if False: 
+           
+            face_frame = frame[face_box[0][1]: face_box[1][1], face_box[0][0]: face_box[1][0]]
+            self.frames.append(face_frame)
+            
+            if len(self.frames) < 60:
+                return frame, None
+            
+            # if more, remove the first element
+            elif len(self.frames) > 60:
+                self.frames.pop(0)
+            
+        
+        
+        # 3) update dynamic limits
+        limit_up = infoAnalyzer['limits']['up']
+        limit_down = infoAnalyzer['limits']['down']
+        limit_left = infoAnalyzer['limits']['left']
+        limit_right = infoAnalyzer['limits']['right']
+        
+        
+        # change the limit according to the position of the head
+        
+        center_face = self._centerBox(face_box)
+        center_frame = self._centerFrame(frame)
+        cv2.circle(frame, center_face,  radius =3, color = (255,0,0))
+        cv2.circle(frame, center_frame, radius =3, color = (0,255,0))
+        
+        # compute the horizontal offset for the score
+
+        max_offset_h = int(frame.shape[1]/2)
+        offset_h = center_frame[0] - center_face[0]
+
+        if not(abs(offset_h) < int(frame.shape[1]/6)):  # not centred respect the camera
+            if offset_h < 0:   # face on right respect center
+                print("to the right")
+                offset_h = self.normalize(abs(offset_h), 0, max_offset_h) * 3/5    # positive value between 0 and 0.5
+                limit_right -= offset_h
+                limit_left  -= offset_h
+                # print(offset_h)
+                
+            else:              # face on the left respect center
+                print("to the left")
+                offset_h = self.normalize(abs(offset_h), 0, max_offset_h)/2 *3/5   # positive value between 0 and 0.5
+                limit_right += offset_h
+                limit_left  += offset_h
+                
+        else: # you are central use the yaw angle
+            if infoAnalyzer['angleYaw'] > 20:       # increment right bound
+                print("turned left")
+                limit_right += math.sin(math.radians(infoAnalyzer['angleYaw'] -10)) # sum positive quantity
+                limit_left  += math.sin(math.radians(infoAnalyzer['angleYaw'] - 10))
+                
+            elif infoAnalyzer['angleYaw'] < -20:    # increment left bound        
+                print("turned right")
+                limit_left += math.sin(math.radians(infoAnalyzer['angleYaw'] + 10))   # sum negative quantity
+                limit_right += math.sin(math.radians(infoAnalyzer['angleYaw'] + 10))
+                
+                
+        # 4) show analytics
+        if "gaze analytics" in to_show:
+            gazeX_direction = infoAnalyzer['gazeX']
+            gazeY_direction = infoAnalyzer['gazeY']
+            cv2.putText(frame, "gaze X:" + str(gazeX_direction), (1050,20), fontFace= cv2.FONT_HERSHEY_DUPLEX, fontScale = 0.8, color= (255,255,255), thickness= 1)
+            cv2.putText(frame, "gaze Y:" + str(gazeY_direction), (1050,80), fontFace= cv2.FONT_HERSHEY_DUPLEX, fontScale = 0.8, color= (255,255,255), thickness= 1)
+            
+            if not (gazeX_direction == -1):
+                if gazeX_direction <=  limit_left:
+                    cv2.putText(frame, "x: Left", (1050,50), fontFace= cv2.FONT_HERSHEY_DUPLEX, fontScale = 0.8, color= (255,255,255), thickness= 1)
+                elif limit_left < gazeX_direction < limit_right:
+                    cv2.putText(frame, "x: Center", (1050,50), fontFace= cv2.FONT_HERSHEY_DUPLEX, fontScale = 0.8, color= (255,255,255), thickness= 1)
+                else:
+                    cv2.putText(frame, "x: Right", (1050,50), fontFace= cv2.FONT_HERSHEY_DUPLEX, fontScale = 0.8, color= (255,255,255), thickness= 1)
+
+            if not (gazeY_direction == -1):
+                if gazeY_direction <=  limit_up:
+                    cv2.putText(frame, "y: Up", (1050,110), fontFace= cv2.FONT_HERSHEY_DUPLEX, fontScale = 0.8, color= (255,255,255), thickness= 1)
+                elif limit_up < gazeY_direction < limit_down:
+                    cv2.putText(frame, "y: Center", (1050,110), fontFace= cv2.FONT_HERSHEY_DUPLEX, fontScale = 0.8, color= (255,255,255), thickness= 1)
+                else:
+                    cv2.putText(frame, "y: Down", (1050,110), fontFace= cv2.FONT_HERSHEY_DUPLEX, fontScale = 0.8, color= (255,255,255), thickness= 1)
+            
+            cv2.putText(frame, "limit L: " + str(limit_left), (1050,150), fontFace= cv2.FONT_HERSHEY_DUPLEX, fontScale = 0.8, color= (255,255,255), thickness= 1)
+            cv2.putText(frame, "limit R: " + str(limit_right), (1050, 170), fontFace= cv2.FONT_HERSHEY_DUPLEX, fontScale = 0.8, color= (255,255,255), thickness= 1)
+            cv2.putText(frame, "limit U: " + str(limit_up), (1050, 190), fontFace= cv2.FONT_HERSHEY_DUPLEX, fontScale = 0.8, color= (255,255,255), thickness= 1)
+            cv2.putText(frame, "limit D: " + str(limit_down), (1050, 210), fontFace= cv2.FONT_HERSHEY_DUPLEX, fontScale = 0.8, color= (255,255,255), thickness= 1)
+        
+        
+        # 5) compute the error horizontal
+        
+        # start with the maximum score
+        score_A = 1
+        h_error = 0
+        v_error = 0
+
+        
+        if  limit_left>= infoAnalyzer['gazeX']:
+            h_error = limit_left - infoAnalyzer['gazeX']              # from 0 to 0.5     
+            h_error = self.normalize(h_error, 0, 1)*2                 # normalize the error
+        
+        elif limit_right <= infoAnalyzer['gazeX']:
+            h_error = infoAnalyzer['gazeX']  - limit_right
+            # h_error = self.normalize(h_error, 0, 1)/2
+            h_error = self.normalize(h_error, 0, 0.7)*2                             
+
+
+
+        # compute the vertical error
+        if  limit_up>= infoAnalyzer['gazeY']:
+            v_error = limit_up - infoAnalyzer['gazeY']              # from 0 to 0.5     
+            v_error = self.normalize(v_error, 0, 1)*2               # normalize the error
+        
+        elif limit_down <= infoAnalyzer['gazeY']:
+            v_error = infoAnalyzer['gazeY']  - limit_down
+            v_error = self.normalize(v_error, 0, 1)
+
+        
+        
+        cv2.putText(frame, "h_error: " + str(h_error), (1050, 250), fontFace= cv2.FONT_HERSHEY_DUPLEX, fontScale = 0.8, color= (0,0,0), thickness= 1)
+        cv2.putText(frame, "v_error: " + str(v_error), (1050, 280), fontFace= cv2.FONT_HERSHEY_DUPLEX, fontScale = 0.8, color= (0,0,0), thickness= 1)
+        
+        # 6) compute the error vertical
+        
+        # 7) penalize the score with the errors
+        if h_error + v_error > 0.9:
+            error = 0.9
+        else:
+            error = h_error + v_error
+        # error = self.normalize(h_error + v_error, 0, 1)
+        score_A -= error
+        
+        
+        #                                                   [score B]
+        
+        # extract only the face
+        
+        # reshape
+        
+        # forward model
+        
+        # get score
+        score_B = 1
+        
+        # final weighted score
+        score = alpha * score_A + (1-alpha) * score_B
+        
+        return frame, score_A
             
       
       
