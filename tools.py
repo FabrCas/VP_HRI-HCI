@@ -4,11 +4,13 @@ import re
 import screeninfo
 import math
 import time
+import torch as T
+from torch.nn import functional as F
 import numpy as np
 import matplotlib.pyplot as plt
-from pipelineA.featuresExtractors import CNN_faceExtractor, FeaturesExtractor
-from pipelineA.attentionAnalyzer import AttentionAnalyzer
 
+from featuresExtractors import CNN_faceExtractor, FeaturesExtractor
+from attentionAnalyzer import AttentionAnalyzer
 
 class WebcamReader(object):
     def __init__(self, frame_rate = 15, resolution = 720):
@@ -76,11 +78,13 @@ class WebcamReader(object):
         return test_prog+1
             
     def _open(self, candidate_id = None):
+        
         # give name to the window
-        cv2.namedWindow('Webcam')
+        # cv2.namedWindow('Webcam')
+
         # Initialize the video capture object
         self.capturer = cv2.VideoCapture(0)
-        
+
         # Set the resolution of the frames
         self.capturer.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
         self.capturer.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
@@ -100,11 +104,12 @@ class WebcamReader(object):
             path = self.path_save + '/' + str(progressive) + '_' + str(candidate_id) + '_' +'testSet.mp4'
             print(path)
             try:
-                print("fps recording -> ", webcam.capturer.get(cv2.CAP_PROP_FPS))
+                print("fps recording -> ", self.capturer.get(cv2.CAP_PROP_FPS))
                 # self.writer = cv2.VideoWriter(path, self.fourcc, webcam.capturer.get(cv2.CAP_PROP_FPS), (self.width, self.height))
                 self.writer = cv2.VideoWriter(path, self.fourcc, self.frame_rate, (self.width, self.height))
             except:
                 print("no available path to save")
+
     
     def _close(self):
         
@@ -120,7 +125,9 @@ class WebcamReader(object):
         except:
             pass  # no instantated
         cv2.destroyAllWindows()
-        
+    
+    # show methods for webcam source
+    
     def show(self, save= True):
         if self.capturer == None or self.writer == None:
             if save:
@@ -266,8 +273,9 @@ class WebcamReader(object):
         self._close()
         
     def showAnalyzer(self, scorer, plotter, monitor_idx = 1, resolution_window = (1280,720)):
-        self._open()
         
+        self._open()
+       
         analyzer = AttentionAnalyzer()
         
         screens = screeninfo.get_monitors()
@@ -329,6 +337,7 @@ class WebcamReader(object):
                 
         self._close()
     
+    # read method for video source
     
     def readVideo(self, name_file, output_size = None, show = True):
         """
@@ -384,8 +393,7 @@ class WebcamReader(object):
         
         # return the numpy array representing the video frames
         return np.array(frames)
-      
-      
+          
 class Plotter(object):
     
     def __init__(self, resolution = 720, max_values = 100, color_rf = (255,255,255), color_values = (0, 255,0)):
@@ -420,6 +428,7 @@ class Plotter(object):
                       color= self.color_rf, thickness = 5)
         
         
+        
     def _draw_rf(self, frame):
         # vertical axis
         self.rf = cv2.line(frame, (self.margin_x, self.height - self.margin_y), (self.margin_x, self.height - self.margin_y - self.height_plot),
@@ -429,6 +438,18 @@ class Plotter(object):
         self.rf = cv2.line(frame, (self.margin_x, self.height - self.margin_y), (self.margin_x + self.width_plot, self.height - self.margin_y),
                       color= self.color_rf, thickness = 5)
         
+        self.rf = cv2.line(frame, (self.margin_x -10, self.height - self.margin_y - int(0.1*self.height_plot)), (self.margin_x + 10, self.height - self.margin_y - int(0.1*self.height_plot)),
+                color= (0,0,255), thickness = 2)
+        
+        self.rf = cv2.line(frame, (self.margin_x -10, self.height - self.margin_y - int(0.3*self.height_plot)), (self.margin_x + 10, self.height - self.margin_y - int(0.3*self.height_plot)),
+                color= (0,128,255), thickness = 2)
+                
+        self.rf = cv2.line(frame, (self.margin_x -10, self.height - self.margin_y - int(0.7*self.height_plot)), (self.margin_x + 10, self.height - self.margin_y - int(0.7*self.height_plot)),
+                color= (0,255,255), thickness = 2)
+                        
+        self.rf = cv2.line(frame, (self.margin_x -10, self.height - self.margin_y - int(self.height_plot)), (self.margin_x + 10, self.height - self.margin_y - int(self.height_plot)),
+                color= (0,255,0), thickness = 2)
+            
         return frame
         
     def _initialize_data(self):
@@ -522,22 +543,31 @@ class Plotter(object):
                 self.y_data.pop(0)                      # pop if max number of points has been reached
                 self.x_data = self.x_values
             
-        frame = self._draw_rf(frame)
+        
            
         for i in range(len(self.x_data) -1):            
             # color = self.value2color( (-1*(self.y_data[i+1] - self.y_base))/self.height_plot )
             # frame = cv2.line(frame, (self.x_data[i],  self.y_data[i]), (self.x_data[i+1],  self.y_data[i+1]), color = color, thickness = 3)
             frame = cv2.line(frame, (self.x_data[i],  self.y_data[i]), (self.x_data[i+1],  self.y_data[i+1]), color = self.value2color(value), thickness = 3)
 
+        frame = self._draw_rf(frame)
+        
         return frame
         
 class Scorer(object):
     
-    def __init__(self):
-        super(Plotter).__init__(model = None)
+    def __init__(self, model = None, alpha = 0.5):
+        super(Plotter).__init__()
+        # self.frames = np.empty((60,3,150,120))
         self.frames = []
         # model from pipeline B
-        self.model
+        self.model = model
+        self.scores = []
+        self.dims_face = (120, 150)   #(w,h)
+        
+        if alpha > 1 or alpha <0:
+            raise ValueError("invalid value for alpha, should be between 0 and 1")
+        self.alpha = alpha
         
     def normalize(self, value, min_value= 0, max_value=0.5):
         """
@@ -566,15 +596,23 @@ class Scorer(object):
         scores = [0.1, 0.3, 0.7, 1.0]
         dists = [dist(x) for x in scores]
         label = np.argmin(dists)
-        return 
+        return label
     
     def _centerBox(self, box):
         return (int((box[0][0] + box[1][0])/2 ), int((box[0][1] + box[1][1])/2))
     
     def _centerFrame(self, frame):
         return (int(frame.shape[1]/2), int(frame.shape[0]/2))
-      
-    def forward(self, frame, infoAnalyzer, alpha = 0.5, to_show = ['gaze analytics']):
+    
+    def _clip(self, value):
+        if value<=0:
+            return 0
+        elif value>=1:
+            return 1
+        else:
+            return value
+        
+    def forward(self, frame, infoAnalyzer, to_show = ['gaze analytics'], grayscale = False):
         """
             infoAnalyzer a dictionary with the following keys:'ratioX', 'ratioY', 'angleYaw', 'limits', 'face_box'
             all scalars except for limits, a dictionary with keys:'up', 'left', 'down', 'right'
@@ -584,22 +622,31 @@ class Scorer(object):
         if infoAnalyzer is None:
             return frame, 0
         
+        
         #                                                   [score A]
         face_box = infoAnalyzer['face_box']
-        # 2) store the faces in frames
-        if False: 
-           
-            face_frame = frame[face_box[0][1]: face_box[1][1], face_box[0][0]: face_box[1][0]]
-            self.frames.append(face_frame)
-            
-            if len(self.frames) < 60:
-                return frame, None
-            
-            # if more, remove the first element
-            elif len(self.frames) > 60:
-                self.frames.pop(0)
-            
         
+        # 2) store the faces in frames
+        face_frame = frame[face_box[0][1]: face_box[1][1], face_box[0][0]: face_box[1][0]]
+        # resize face
+        face_frame = cv2.resize(face_frame, (self.dims_face[0], self.dims_face[1]), interpolation = cv2.INTER_LINEAR)
+        # grayscale if requested
+        if grayscale: face_frame = cv2.cvtColor(face_frame, cv2.COLOR_BGR2GRAY)
+        
+        # plt.imshow(face_frame, cmap='gray')
+        # plt.show()
+        # print(face_frame.shape)
+        
+        self.frames.append(face_frame)
+        
+        if len(self.frames) < 60:
+            return frame, None
+        
+        # if more, remove the first element
+        elif len(self.frames) > 60:
+            self.frames.pop(0)
+            
+        # print(len(self.frames))
         
         # 3) update dynamic limits
         limit_up = infoAnalyzer['limits']['up']
@@ -622,26 +669,26 @@ class Scorer(object):
 
         if not(abs(offset_h) < int(frame.shape[1]/6)):  # not centred respect the camera
             if offset_h < 0:   # face on right respect center
-                print("to the right")
+                # print("to the right")
                 offset_h = self.normalize(abs(offset_h), 0, max_offset_h) * 3/5    # positive value between 0 and 0.5
                 limit_right -= offset_h
                 limit_left  -= offset_h
                 # print(offset_h)
                 
             else:              # face on the left respect center
-                print("to the left")
+                # print("to the left")
                 offset_h = self.normalize(abs(offset_h), 0, max_offset_h)/2 *3/5   # positive value between 0 and 0.5
                 limit_right += offset_h
                 limit_left  += offset_h
                 
         else: # you are central use the yaw angle
             if infoAnalyzer['angleYaw'] > 20:       # increment right bound
-                print("turned left")
+                # print("turned left")
                 limit_right += math.sin(math.radians(infoAnalyzer['angleYaw'] -10)) # sum positive quantity
                 limit_left  += math.sin(math.radians(infoAnalyzer['angleYaw'] - 10))
                 
             elif infoAnalyzer['angleYaw'] < -20:    # increment left bound        
-                print("turned right")
+                # print("turned right")
                 limit_left += math.sin(math.radians(infoAnalyzer['angleYaw'] + 10))   # sum negative quantity
                 limit_right += math.sin(math.radians(infoAnalyzer['angleYaw'] + 10))
                 
@@ -715,25 +762,38 @@ class Scorer(object):
             error = 0.9
         else:
             error = h_error + v_error
+            
         # error = self.normalize(h_error + v_error, 0, 1)
         score_A -= error
-        
+        score_A = self._clip(score_A)
         
         #                                                   [score B]
         
-        # extract only the face
+        if self.model != None:
+            
+            # prepare data
+            frames = np.array(self.frames)
+            frames = np.transpose(frames, (3, 0, 1, 2))
+              
+            # forward model
+            y_pred = self.model.forward(frames)[0]
+            
+            # print(y_pred)
+            
+            # get score
+            score_B = self.label2score(y_pred)
+            
+            # print(score_B)
+            
+            # final weighted score
+            score = self.alpha * score_A + (1-self.alpha) * score_B
+        else:
+            score = score_A
         
-        # reshape
+        # store the score
+        self.scores.append(score)
         
-        # forward model
-        
-        # get score
-        score_B = 1
-        
-        # final weighted score
-        score = alpha * score_A + (1-alpha) * score_B
-        
-        return frame, score_A
+        return frame, score
             
       
       
@@ -771,8 +831,6 @@ def test_plotter():
 
 if __name__ == "__main__":
     webcam = WebcamReader(frame_rate=15, resolution= 720)
-    # webcam.show()
-    # webcam.showFaceCNN()
     scorer = Scorer()
     plotter = Plotter()
     webcam.showAnalyzer(scorer, plotter)

@@ -3,10 +3,8 @@ import math
 import cv2 
 import numpy as np
 # import features detectors
-try:
-    from pipelineA.featuresExtractors import FeaturesExtractor
-except:
-    from featuresExtractors import FeaturesExtractor
+
+from featuresExtractors import FeaturesExtractor
 
 
 class AttentionAnalyzer():
@@ -155,7 +153,7 @@ class AttentionAnalyzer():
         up_white_pixels = cv2.countNonZero(up_patch_thr)
         down_white_pixels = cv2.countNonZero(down_patch_thr)
         
-        cv2.polylines(frame, ([eye_points]), True, color = (0,255,0), thickness= thickness)
+        # cv2.polylines(frame, ([eye_points]), True, color = (0,255,0), thickness= thickness)
         # show section
         if debug: 
             cv2.polylines(frame, ([eye_points]), True, color = (0,255,0), thickness= thickness)
@@ -296,35 +294,7 @@ class AttentionAnalyzer():
         
         # save limit in a dictionary:
         limits = {'up': limit_up, 'left': limit_left, 'down': limit_down, 'right': limit_right}
-        
-        # if "gaze analytics" in to_show:
-        
-        #     if mode == 'ratio':
-                # cv2.putText(frame, "ratioX:" + str(ratioX_white_pixels), (1050,20), fontFace= cv2.FONT_HERSHEY_DUPLEX, fontScale = 0.8, color= (255,255,255), thickness= 1)
-                # cv2.putText(frame, "ratioy:" + str(ratioY_white_pixels), (1050,80), fontFace= cv2.FONT_HERSHEY_DUPLEX, fontScale = 0.8, color= (255,255,255), thickness= 1)
-                
-                # # ATTENTION: if the frame is not flipped the relation should be inverted! since the distribution behaves in a reflected way
-                # # compute direction between central, left and right
-                
-                # if not (ratioX_white_pixels == -1):
-                #     if ratioX_white_pixels <=  limit_left:
-                #         cv2.putText(frame, "x: Left", (1050,50), fontFace= cv2.FONT_HERSHEY_DUPLEX, fontScale = 0.8, color= (255,255,255), thickness= 1)
-                #     elif limit_left < ratioX_white_pixels < limit_right:
-                #         cv2.putText(frame, "x: Center", (1050,50), fontFace= cv2.FONT_HERSHEY_DUPLEX, fontScale = 0.8, color= (255,255,255), thickness= 1)
-                #     else:
-                #         cv2.putText(frame, "x: Right", (1050,50), fontFace= cv2.FONT_HERSHEY_DUPLEX, fontScale = 0.8, color= (255,255,255), thickness= 1)
-
-                # if not (ratioY_white_pixels == -1):
-                #     if ratioY_white_pixels <=  limit_up:
-                #         cv2.putText(frame, "y: Up", (1050,110), fontFace= cv2.FONT_HERSHEY_DUPLEX, fontScale = 0.8, color= (255,255,255), thickness= 1)
-                #     elif limit_up < ratioY_white_pixels < limit_down:
-                #         cv2.putText(frame, "y: Center", (1050,110), fontFace= cv2.FONT_HERSHEY_DUPLEX, fontScale = 0.8, color= (255,255,255), thickness= 1)
-                #     else:
-                #         cv2.putText(frame, "y: Down", (1050,110), fontFace= cv2.FONT_HERSHEY_DUPLEX, fontScale = 0.8, color= (255,255,255), thickness= 1)
-                        
-            # elif mode == 'perc_avg':
-                
-
+    
         # return section
         
         if mode == 'ratio': 

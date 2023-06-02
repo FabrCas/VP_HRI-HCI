@@ -1,4 +1,3 @@
-
 from time import time
 import multiprocessing as mp
 import os
@@ -7,7 +6,6 @@ from tqdm import tqdm
 import gc
 import cv2
 import shutil
-import sys
 import json
 import numpy as np
 import warnings
@@ -23,10 +21,9 @@ import torchvision.transforms as transforms
 from torchvision.transforms.functional import InterpolationMode
 
 # face extractors
-parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-sys.path.append(parent_dir)
-# from pipelineA import featuresExtractors
-from pipelineA.featuresExtractors import CNN_faceExtractor
+from featuresExtractors import CNN_faceExtractor
+
+
 """
     INFO DATASET:
     The DAiSEE dataset is the first multi-label video classification dataset. It is made up of 9068 video snippets
@@ -167,14 +164,11 @@ class CustomDaisee(Dataset):
                 plt.show()
 
         # Return the video and its label as a dictionary
-        # sample = {'frames': frames, 'label': label, 'timestamps': timestamps, 'label_description': label_description}
-        
         return frames, label
 
-class Dataset(object):
+class DatasetCustom():
     
     def __init__(self, batch_size = 1, version= 'v2', grayscale = False, verbose = False):
-        super().__init__()
         
         self.DATASET_PATH = "/home/faber/Documents/EAI1/data"
         self.batch_size = batch_size
@@ -1121,48 +1115,14 @@ if __name__ == "__main__":
     dataset = Dataset(batch_size=1, version='v2', grayscale= True)
     dataset.print_loaderCustomDaisee(dataset.get_validationSet())
 
-    # freq, distr = dataset.balanceLabels(type_ds="validation", verbose= True)
-    # print(freq)
-    # print(distr)
-    # test_fetch_speed(dataloader)
+    freq, distr = dataset.balanceLabels(type_ds="validation", verbose= True)
+    print(freq)
+    print(distr)
+    test_fetch_speed(dataloader)
 
 
 
-"""
-class frequency: -> {0: 34, 1: 214, 2: 2649, 3: 2585}
-minimum frequency -> (0, 34)
-maximum frequency -> (2, 2649)
-lenght indices: 34 214 2649 2585
-n_sample for 0 -> 34
-n_sample for 1 -> 51
-n_sample for 2 -> 342
-n_sample for 3 -> 341
-number of samples after the reduction:  768
-Saving validation set of dataset v2...
 
-lass frequency: -> {0: 23, 1: 160, 2: 912, 3: 625}
-minimum frequency -> (0, 23)
-maximum frequency -> (2, 912)
-lenght indices: 23 160 912 625
-n_sample for 0 -> 23
-n_sample for 1 -> 36
-n_sample for 2 -> 107
-n_sample for 3 -> 99
-number of samples after the reduction:  265
-Saving test set of dataset v2...
-
-class frequency: -> {0: 4, 1: 81, 2: 861, 3: 777}
-minimum frequency -> (0, 4)
-maximum frequency -> (2, 861)
-lenght indices: 4 81 861 777
-n_sample for 0 -> 4
-n_sample for 1 -> 19
-n_sample for 2 -> 107
-n_sample for 3 -> 106
-number of samples after the reduction:  236
-
-
-"""
 
 
 

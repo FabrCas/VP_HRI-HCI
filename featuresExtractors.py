@@ -340,7 +340,7 @@ class FeaturesExtractor(object):
     
     def __init__(self):
         super().__init__()
-        print("dlib version: {}".format(dlib.__version__))
+        # print("dlib version: {}".format(dlib.__version__))
         
         # load face detector
         self.face_extractor = dlib.get_frontal_face_detector()

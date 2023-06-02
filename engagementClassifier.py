@@ -5,6 +5,7 @@ import warnings
 import gc
 import json
 
+
 from datetime       import date
 from tqdm           import tqdm
 random.seed(22)
@@ -12,12 +13,12 @@ import matplotlib.pyplot as plt
 from matplotlib import colormaps
 from matplotlib.colors import Normalize
 
-# classification metrics 
+# # classification metrics 
 from sklearn.metrics import precision_score, recall_score, f1_score,     \
         confusion_matrix, hamming_loss, jaccard_score, accuracy_score
         
     
-# torch import
+# # # torch import
 import torch as T
 from torch import nn
 from torch.nn import functional as F
@@ -25,9 +26,14 @@ from torchsummary import summary
 from torch.optim import Adam, lr_scheduler
 from torch.cuda.amp import GradScaler, autocast
 
-# custom classes
+# # # custom classes
 from models import ResNet2D, ResNet3D
-from dataset import Dataset
+
+# boolean variable for training or testing
+training_testing = True
+if training_testing:
+    from dataAnalyzer import DatasetCustom
+
 
 class EngagementClassifier(nn.Module):
     # class constructor
@@ -49,7 +55,8 @@ class EngagementClassifier(nn.Module):
         self.batch_size = batch_size
         self.version_dataset = version_dataset
         self.device = T.device("cuda:0" if T.cuda.is_available() else "cpu")
-        self.dataset: Dataset = Dataset(batch_size = self.batch_size, version = version_dataset, grayscale= grayscale)
+        if training_testing:
+            self.dataset = DatasetCustom(batch_size = self.batch_size, version = version_dataset, grayscale= grayscale)
         
         # Boolean flags for the model
         self.video_resnet = video_resnet
@@ -71,8 +78,10 @@ class EngagementClassifier(nn.Module):
                 self.model: ResNet2D = ResNet2D(depth_level = depth_level, n_channels = 3)
             
         self.model.to(self.device)
-        self.init_weights_kaimingNormal()
-        self.class_weights = T.tensor(self.compute_class_weights()).to(self.device)
+        
+        if training_testing:
+            self.init_weights_kaimingNormal()
+            self.class_weights = T.tensor(self.compute_class_weights()).to(self.device)
         
         # self.learning_weights = [161.235, 25.617, 2.069, 2.121]   # weights for v1
         # self.learning_weights = [22.588, 15.059, 2.246, 2.252]    # weights for v2
@@ -110,7 +119,7 @@ class EngagementClassifier(nn.Module):
     
     # ---------------- [data processing functions]
     
-    def sample_frames(self, x, n_frames: int = 30, fps_sampling:int = 15, verbose = False): 
+    def sample_frames(self, x, n_frames: int = 60, fps_sampling:int = 15, verbose = False): 
         """
             15 fps sampler function from a 30 fps video, 
             @ param x: video vector of the format (batch, frames, channels, width , height)
@@ -421,6 +430,8 @@ class EngagementClassifier(nn.Module):
         except Exception as e :
             print(e)
             print(f"Not found the model to the folder: {folder_model} of the epoch: {epoch_model}")
+            return
+        
         self.model.eval()
         
         # define the array to store the result
@@ -451,6 +462,7 @@ class EngagementClassifier(nn.Module):
             predictions = np.append(predictions, y_pred.flatten(), axis  =0)
             targets = np.append(targets, label.flatten(), axis  =0)
             
+            
         # print(predictions.shape)
         # print(predictions)
         # print(predictions.dtype)
@@ -480,7 +492,11 @@ class EngagementClassifier(nn.Module):
     def loadModel(self, epoch, path_folder= "./models"):
         
         name_file = 'resNet3D-'+ str(epoch) +'.ckpt'
+        if not('model' in path_folder):
+            path_folder= os.path.join("./models", path_folder)
         path_save = os.path.join(path_folder, name_file)
+        
+        
         print("Loading model from: ", path_save)
         ckpt = T.load(path_save)
         self.model.load_state_dict(ckpt)
@@ -502,7 +518,11 @@ class EngagementClassifier(nn.Module):
         summary(self.model, inputShape)
 
     
-    def _computeMetrics(self,output, targets, name_model, epoch: str, labels = [0,1,2,3], average = "micro", save_results = True):  #labels not used
+    def _computeMetrics(self,output, targets, name_model, epoch: str, labels = [0,1,2,3], average = "macro", save_results = True):  #labels not used
+        
+        print(output)
+        print(targets)
+        
         
         if save_results: 
             # create path if doesn't exist
@@ -640,22 +660,23 @@ class EngagementClassifier(nn.Module):
         # correct the dtype
         if not (T.dtype is T.float32):
             x = x.to(T.float32)
-        
+
         with T.no_grad():
-            x = x.to(self.device)
-            if verbose: print("input shape ->", x.shape) 
-            
-            # compute logits    
-            logits  = self.model.forward(x)
-            if verbose: print("logits shape ->",logits.shape) 
-            
-            # compute probabilities
-            probs  = self.output_af(logits, dim = -1)               # -1, so on the last axis
-            if verbose: print("probs shape ->",probs.shape)
-            
-            # get the class with max probability 
-            y_pred = T.argmax(probs, dim= -1).cpu().detach().numpy().astype(int)
-            if verbose: print("y_pred shape ->",y_pred.shape)
+            with autocast():
+                x = x.to(self.device)
+                if verbose: print("input shape ->", x.shape) 
+                
+                # compute logits    
+                logits  = self.model.forward(x)
+                if verbose: print("logits shape ->",logits.shape) 
+                
+                # compute probabilities
+                probs  = self.output_af(logits, dim = -1)               # -1, so on the last axis
+                if verbose: print("probs shape ->",probs.shape)
+                
+                # get the class with max probability 
+                y_pred = T.argmax(probs, dim= -1).cpu().detach().numpy().astype(int)
+                if verbose: print("y_pred shape ->",y_pred.shape)
 
         
         return y_pred
@@ -725,16 +746,15 @@ def test_loss_plotting():
     loss = [2,10,40,100,25,13,6,3,2,1]
     classifier.plot_loss(loss, 30, duration_timer= None)
 
-if __name__ == "__main__":
-    pass  
-    # test_forward_2DNet()
-    # test_forward_3DNet()
-    # test_training()
-    # test_validation()
-    # test_forward()
-    # test_sampler()
-    # test_loss_plotting()
-    # test_testing()
+
+# test_forward_2DNet()
+# test_forward_3DNet()
+# test_training()
+# test_validation()
+# test_forward()
+# test_sampler()
+# test_loss_plotting()
+# test_testing()
 
 # ----------------------------------------------------------------------------------------training functions 
 
@@ -769,70 +789,70 @@ def train_5():
     # v3 time learning 33 minutes per epoch
     # v1 time learning 4h per epoch
     
-def train_6(): # to test
+def train_6(): 
     classifier = EngagementClassifier(batch_size= 16, version_dataset= 'v2', grayscale= False, depth_level= 0)
     classifier.n_epochs = 100
     classifier.patience = 100
-    classifier.train(name_model= "train_v2_batch16_color_depth0_epochs100", save_model= True, verbose= False)  
+    classifier.train(name_model= "train_v2_batch16_color_depth0_epochs75", save_model= True, verbose= False)  
 
 
-def train_7(): # to test
+def train_7():
     classifier = EngagementClassifier(batch_size= 32, version_dataset= 'v4', grayscale= True, depth_level= 0)
     classifier.n_epochs = 20
     classifier.patience = 20
     classifier.train(name_model= "train_v4_batch32_gray_depth0_epochs20", save_model= True, verbose= False) 
 
-def train_8(): # to test
+def train_8():
     classifier = EngagementClassifier(batch_size= 32, version_dataset= 'v2', grayscale= True, depth_level= 0)
     classifier.n_epochs = 20
     classifier.patience = 20
     classifier.train(name_model= "train_v2_batch32_gray_depth0_epochs20", save_model= True, verbose= False) 
 
-def train_9(): # to test
+def train_9():
     classifier = EngagementClassifier(batch_size= 16, version_dataset= 'v4', grayscale= True, depth_level= 0)
     classifier.n_epochs = 100
     classifier.patience = 30
     classifier.train(name_model= "train_v4_batch16_gray_depth0_epochs100_patience30", save_model= True, verbose= False) 
 
-def train_10(): # to test
+def train_10(): 
     classifier = EngagementClassifier(batch_size= 16, version_dataset= 'v2', grayscale= True, depth_level= 0)
     classifier.n_epochs = 100
     classifier.patience = 30
     classifier.train(name_model= "train_v2_batch16_gray_depth0_epochs100_patience30", save_model= True, verbose= False) 
     
-def train_11(): # to test
+def train_11():
     classifier = EngagementClassifier(batch_size= 16, version_dataset= 'v2', grayscale= True, depth_level= 1)
     classifier.n_epochs = 100
     classifier.patience = 30
     classifier.train(name_model= "train_v2_batch16_gray_depth1_epochs100_patience30", save_model= True, verbose= False)    
 
-def train_12(): # to test
+def train_12():
     classifier = EngagementClassifier(batch_size= 16, version_dataset= 'v2', grayscale= True, depth_level= 1)
     classifier.n_epochs = 100
     classifier.patience = 100
     classifier.train(name_model= "train_v2_batch16_gray_depth1_epochs100", save_model= True, verbose= False)    
 
-def train_13(): # to test
+def train_13():
     classifier = EngagementClassifier(batch_size= 16, version_dataset= 'v2', grayscale= True, depth_level= 2)
     classifier.n_epochs = 100
     classifier.patience = 30
     classifier.train(name_model= "train_v2_batch16_gray_depth2_epochs100_patience30", save_model= True, verbose= False)    
 
-def train_14(): # to test
+def train_14():
     classifier = EngagementClassifier(batch_size= 16, version_dataset= 'v2', grayscale= True, depth_level= 2)
     classifier.n_epochs = 80
     classifier.patience = 80
     classifier.train(name_model= "train_v2_batch16_gray_depth2_epochs80", save_model= True, verbose= False)   
 
 
-def train_15(): # to test
+def train_15(): 
     classifier = EngagementClassifier(batch_size= 8, version_dataset= 'v2', grayscale= True, depth_level= 3)
     classifier.n_epochs = 100
     classifier.patience = 30
     classifier.train(name_model= "train_v2_batch8_gray_depth3_epochs100_patience30", save_model= True, verbose= False)   
 
 
-def train_16(): # to test
+def train_16():
     classifier = EngagementClassifier(batch_size= 8, version_dataset= 'v2', grayscale= True, depth_level= 3)
     classifier.n_epochs = 100
     classifier.patience = 100
@@ -841,12 +861,14 @@ def train_16(): # to test
     
 if __name__ == "__main__":  
     pass
-    train_16()
-    # test_testing(name="train_v3_batch2_gray_depth0_epochs5_27-05-2023", epoch = 5, grayscale= True, batch_size= 2)
+    # train_16()
 
 
-
-
-
-
-
+# buoni
+# test_testing(name="train_v2_batch16_gray_depth1_epochs100_01-06-2023", epoch = 50, grayscale= True, batch_size= 32, depth_level= 1)
+# test_testing(name="train_v2_batch16_gray_depth1_epochs100_01-06-2023", epoch = 55, grayscale= True, batch_size= 32, depth_level= 1)
+# test_testing(name="train_v2_batch16_gray_depth2_epochs100_patience30_01-06-2023", epoch = 55, grayscale= True, batch_size= 32, depth_level= 2)
+# test_testing(name="train_v2_batch16_gray_depth2_epochs80_01-06-2023", epoch = 45, grayscale= True, batch_size= 32, depth_level= 2)
+# test_testing(name="train_v2_batch16_gray_depth2_epochs80_01-06-2023", epoch = 60, grayscale= True, batch_size= 32, depth_level= 2)
+# test_testing(name="train_v2_batch8_gray_depth3_epochs100_02-06-2023", epoch = 15, grayscale= True, batch_size= 32, depth_level= 3)
+# test_testing(name="train_v2_batch8_gray_depth3_epochs100_02-06-2023", epoch = 100, grayscale= True, batch_size= 32, depth_level= 3)
