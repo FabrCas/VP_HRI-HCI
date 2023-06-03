@@ -441,7 +441,7 @@ class Plotter(object):
         self.rf = cv2.line(frame, (self.margin_x -10, self.height - self.margin_y - int(0.1*self.height_plot)), (self.margin_x + 10, self.height - self.margin_y - int(0.1*self.height_plot)),
                 color= (0,0,255), thickness = 2)
         
-        self.rf = cv2.line(frame, (self.margin_x -10, self.height - self.margin_y - int(0.3*self.height_plot)), (self.margin_x + 10, self.height - self.margin_y - int(0.3*self.height_plot)),
+        self.rf = cv2.line(frame, (self.margin_x -10, self.height - self.margin_y - int(0.4*self.height_plot)), (self.margin_x + 10, self.height - self.margin_y - int(0.4*self.height_plot)),
                 color= (0,128,255), thickness = 2)
                 
         self.rf = cv2.line(frame, (self.margin_x -10, self.height - self.margin_y - int(0.7*self.height_plot)), (self.margin_x + 10, self.height - self.margin_y - int(0.7*self.height_plot)),
@@ -506,9 +506,9 @@ class Plotter(object):
 
         if value < 0.1:
             return (0,0, 255)
-        elif 0.1 <= value <= 0.3:
+        elif 0.1 <= value <= 0.4:
             return  (0,128, 255)
-        elif 0.3 < value <= 0.7:
+        elif 0.4 < value <= 0.7:
             return  (0,255, 255)
         else:
             return (0,255,0)
@@ -583,7 +583,7 @@ class Scorer(object):
         if label == 0:
             return 0.1
         elif label == 1:
-            return 0.3
+            return 0.4
         elif label == 2:
             return 0.7
         elif label == 3:
@@ -593,7 +593,7 @@ class Scorer(object):
         dist = lambda x: abs(x - score)
         
         # the scores associated to the labels
-        scores = [0.1, 0.3, 0.7, 1.0]
+        scores = [0.1, 0.4, 0.7, 1.0]
         dists = [dist(x) for x in scores]
         label = np.argmin(dists)
         return label
@@ -611,6 +611,89 @@ class Scorer(object):
             return 1
         else:
             return value
+        
+    def forward_scoreA(self, frame, infoAnalyzer):
+        if infoAnalyzer is None:
+            return frame, 0
+        
+        
+        face_box = infoAnalyzer['face_box']
+        
+        limit_up = infoAnalyzer['limits']['up']
+        limit_down = infoAnalyzer['limits']['down']
+        limit_left = infoAnalyzer['limits']['left']
+        limit_right = infoAnalyzer['limits']['right']
+        
+        center_face = self._centerBox(face_box)
+        center_frame = self._centerFrame(frame)
+        
+        max_offset_h = int(frame.shape[1]/2)
+        offset_h = center_frame[0] - center_face[0]
+
+        if not(abs(offset_h) < int(frame.shape[1]/6)):  # not centred respect the camera
+            if offset_h < 0:   # face on right respect center
+                # print("to the right")
+                offset_h = self.normalize(abs(offset_h), 0, max_offset_h) * 3/5    # positive value between 0 and 0.5
+                limit_right -= offset_h
+                limit_left  -= offset_h
+                # print(offset_h)
+                
+            else:              # face on the left respect center
+                # print("to the left")
+                offset_h = self.normalize(abs(offset_h), 0, max_offset_h)/2 *3/5   # positive value between 0 and 0.5
+                limit_right += offset_h
+                limit_left  += offset_h
+                
+        else: # you are central use the yaw angle
+            if infoAnalyzer['angleYaw'] > 20:       # increment right bound
+                # print("turned left")
+                limit_right += math.sin(math.radians(infoAnalyzer['angleYaw'] -10)) # sum positive quantity
+                limit_left  += math.sin(math.radians(infoAnalyzer['angleYaw'] - 10))
+                
+            elif infoAnalyzer['angleYaw'] < -20:    # increment left bound        
+                # print("turned right")
+                limit_left += math.sin(math.radians(infoAnalyzer['angleYaw'] + 10))   # sum negative quantity
+                limit_right += math.sin(math.radians(infoAnalyzer['angleYaw'] + 10))
+                
+        
+        score_A = 1
+        h_error = 0
+        v_error = 0
+
+        
+        if  limit_left>= infoAnalyzer['gazeX']:
+            h_error = limit_left - infoAnalyzer['gazeX']              # from 0 to 0.5     
+            h_error = self.normalize(h_error, 0, 1)*2                 # normalize the error
+        
+        elif limit_right <= infoAnalyzer['gazeX']:
+            h_error = infoAnalyzer['gazeX']  - limit_right
+            # h_error = self.normalize(h_error, 0, 1)/2
+            h_error = self.normalize(h_error, 0, 0.7)*2                             
+
+
+
+        # compute the vertical error
+        if  limit_up>= infoAnalyzer['gazeY']:
+            v_error = limit_up - infoAnalyzer['gazeY']              # from 0 to 0.5     
+            v_error = self.normalize(v_error, 0, 1)*2               # normalize the error
+        
+        elif limit_down <= infoAnalyzer['gazeY']:
+            v_error = infoAnalyzer['gazeY']  - limit_down
+            v_error = self.normalize(v_error, 0, 1)
+            
+            
+        if h_error + v_error > 0.9:
+            error = 0.9
+        else:
+            error = h_error + v_error
+            
+        # error = self.normalize(h_error + v_error, 0, 1)
+        score_A -= error
+        score_A = self._clip(score_A)
+        
+        return score_A
+
+        
         
     def forward(self, frame, infoAnalyzer, to_show = ['gaze analytics'], grayscale = False):
         """
@@ -773,7 +856,11 @@ class Scorer(object):
             
             # prepare data
             frames = np.array(self.frames)
-            frames = np.transpose(frames, (3, 0, 1, 2))
+            try:
+                frames = np.transpose(frames, (3, 0, 1, 2))
+            except:
+                frames = np.expand_dims(frames, axis=-1)
+                frames = np.transpose(frames, (3, 0, 1, 2))
               
             # forward model
             y_pred = self.model.forward(frames)[0]

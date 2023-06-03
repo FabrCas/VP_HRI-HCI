@@ -99,7 +99,8 @@ class EngagementClassifier(nn.Module):
         self.lr = 1e-4
         self.n_epochs = 10
         self.weight_decay = 0.001   # L2 regularization term 
-        self.patience = 5           # patience for earling stopping 
+        self.patience = 5           # patience for earling stopping
+        self.type_early_stopping = "acc"
                 
     # ---------------- [initialization functions]
     
@@ -212,7 +213,7 @@ class EngagementClassifier(nn.Module):
         
         print (f"Validation for the epoch: {epoch} ...")
         # define array for validation loss story and prediction counters to compute the accuracy
-        # losses = []
+        losses = []
         correct_predictions = 0
         num_predictions = 0 
         
@@ -231,10 +232,10 @@ class EngagementClassifier(nn.Module):
                     probs   = self.output_af(logits, dim = -1) 
                     y_pred  = T.argmax(probs, dim= -1).cpu().numpy().astype(int)
                 
-                    # loss    = self.focal_loss(y_pred = logits, y_true = y, alpha=self.class_weights ,reduction= 'sum')
+                    loss    = self.focal_loss(y_pred = logits, y_true = y, alpha=self.class_weights ,reduction= 'sum')
         
             y = y.cpu().numpy()  
-            # losses.append(loss.item())
+            losses.append(loss.item())
             
             correct_predictions += (y_pred == y).sum()
             num_predictions += y_pred.shape[0]
@@ -244,7 +245,8 @@ class EngagementClassifier(nn.Module):
         accuracy = correct_predictions / num_predictions
         
         # return mean_loss, accuracy
-        return accuracy
+        loss_avg = sum(losses)/len(losses)
+        return accuracy, loss_avg
         
 
     def train(self, name_model = "test", save_model = False, verbose = True, early_stopping = True):
@@ -267,8 +269,8 @@ class EngagementClassifier(nn.Module):
 
         optimizer = Adam(self.model.parameters(), lr = self.lr, weight_decay =  self.weight_decay,)
         
-        # scheduler = lr_scheduler.OneCycleLR(optimizer, max_lr=self.lr, steps_per_epoch=n_steps, epochs=self.n_epochs, pct_start=0.3)
-        scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor = 0.5, patience = 5, cooldown = 2, min_lr = 1e-5, verbose = True) # reduce of a half the learning rate 
+        scheduler = lr_scheduler.OneCycleLR(optimizer, max_lr=self.lr, steps_per_epoch=n_steps, epochs=self.n_epochs, pct_start=0.3)
+        # scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor = 0.5, patience = 5, cooldown = 2, min_lr = 1e-5, verbose = True) # reduce of a half the learning rate 
         
         scaler = GradScaler()
         
@@ -359,7 +361,7 @@ class EngagementClassifier(nn.Module):
                     scaler.update()
                     
                     # update schedulers if one cycle LR
-                    # scheduler.step()
+                    scheduler.step()
                     
                     # print info every 50 steps 
                     if ((step_index+1)%loss_steps_freq)== 0:
@@ -386,25 +388,42 @@ class EngagementClassifier(nn.Module):
                 
                 
                 # Data validation
-                acc = self.valid(valid_dataloader, epoch = epoch_index+1)
+                acc, loss = self.valid(valid_dataloader, epoch = epoch_index+1)
                 print(f"Accuracy from validation: {acc}")
-                valid_history.append(acc)
+                print(f"loss from validation: {loss}")
                 
-                if early_stopping:   
-                    # Early stopping
-                    if epoch_index > 0:
-                        if valid_history[-1] < valid_history[-2]:
-                            if patience_counter >= self.patience:
-                                print("Early stop")
-                                break
+                # Early stopping
+                if early_stopping: 
+                    if self.type_early_stopping == 'acc':
+                        valid_history.append(acc)
+                        if epoch_index > 0:
+                            if valid_history[-1] < valid_history[-2]:
+                                if patience_counter >= self.patience:
+                                    print("Early stop")
+                                    break
+                                else:
+                                    print("Pantience counter increased")
+                                    patience_counter += 1
                             else:
-                                print("Pantience counter increased")
-                                patience_counter += 1
-                        else:
-                            print("Accuracy increased respect previous epoch")
+                                print("Accuracy increased respect previous epoch")
+                                
+                    elif self.type_early_stopping == 'loss':
+                        valid_history.append(loss)
+                                          
+                        if epoch_index > 0:
+                            if valid_history[-1] > valid_history[-2]:
+                                if patience_counter >= self.patience:
+                                    print("Early stop")
+                                    break
+                                else:
+                                    print("Pantience counter increased")
+                                    patience_counter += 1
+                            else:
+                                print("loss decreased respect previous epoch")
+                    
                 
                 # based on the accuracy update the learning rate
-                scheduler.step(acc)
+                # scheduler.step(acc)
 
             # save last epoch if not already saved
             if not(saved):
@@ -414,7 +433,7 @@ class EngagementClassifier(nn.Module):
             
             # print the plot with the avg loss over epochs
             name_folder = os.path.join("./results",name_model+ "_" + date_)
-            self.plot_loss(loss_array= loss_epochs, epoch= str(self.n_epochs), path_save= name_folder ,duration_timer = 3000)
+            self.plot_loss(loss_array= loss_epochs, epoch= str(self.n_epochs), path_save= name_folder ,duration_timer = 1000)
         
     
     def test(self, epoch_model, folder_model, verbose = True,):
@@ -857,11 +876,17 @@ def train_16():
     classifier.n_epochs = 100
     classifier.patience = 100
     classifier.train(name_model= "train_v2_batch8_gray_depth3_epochs100", save_model= True, verbose= False)   
-    
+
+def train_17():  # to test
+    classifier = EngagementClassifier(batch_size= 16, version_dataset= 'v2', grayscale= True, depth_level= 1)
+    classifier.n_epochs = 100
+    classifier.patience = 20
+    classifier.type_early_stopping = 'loss'
+    classifier.train(name_model= "train_v2_batch16_gray_depth1_epochs100_patienceLoss20", save_model= True, verbose= False)    
     
 if __name__ == "__main__":  
     pass
-    # train_16()
+    train_17()
 
 
 # buoni
