@@ -32,15 +32,18 @@ from models import ResNet2D, ResNet3D
 # boolean variable for training or testing
 training_testing = True
 if training_testing:
-    from dataAnalyzer import DatasetCustom
+    from customDataset import CustomDaisee
 
 
 class EngagementClassifier(nn.Module):
     # class constructor
-    def __init__(self, args = None, version_dataset= "v2", video_resnet = True, grayscale = False, depth_level = 0, batch_size = 1):
+    def __init__(self, version_dataset= "v2", video_resnet = True, grayscale = False, depth_level = 0, batch_size = 1):
         """
-        @param args: list of arguments from main module 
+        @version_dataset: define which type of the dataset to use
+        @video_resnet: boolean variable to specify if use 3D resnet or 2D
+        @grauyscale: boolean variable to specify if images are in grayscale
         @param depth_level: int value to choose depth of the network
+        @param batch_sze: int value to the length of the batch
         
         """
         # correct file system position
@@ -48,7 +51,6 @@ class EngagementClassifier(nn.Module):
         
         # superclass call and parameters setting
         super().__init__()
-        self.args = args
         self.batch_size = batch_size
         
         # set Dataset and device
@@ -56,7 +58,7 @@ class EngagementClassifier(nn.Module):
         self.version_dataset = version_dataset
         self.device = T.device("cuda:0" if T.cuda.is_available() else "cpu")
         if training_testing:
-            self.dataset = DatasetCustom(batch_size = self.batch_size, version = version_dataset, grayscale= grayscale)
+            self.dataset = CustomDaisee(batch_size = self.batch_size, version = version_dataset, grayscale= grayscale)
         
         # Boolean flags for the model
         self.video_resnet = video_resnet
@@ -83,23 +85,15 @@ class EngagementClassifier(nn.Module):
             self.init_weights_kaimingNormal()
             self.class_weights = T.tensor(self.compute_class_weights()).to(self.device)
         
-        # self.learning_weights = [161.235, 25.617, 2.069, 2.121]   # weights for v1
-        # self.learning_weights = [22.588, 15.059, 2.246, 2.252]    # weights for v2
-        
-        
         # define learning functions
-        """ 
-         softmax produces a probability distribution over classes, while log softmax transforms
-         the softmax probabilities into a logarithmic scale for numerical stability during 
-        """
-        self.output_af  = F.softmax             # F.log_softmax
-        self.loss_f     = F.cross_entropy       # nn.CrossEntropyLoss
+        self.output_af  = F.softmax            
+        self.loss_f     = F.cross_entropy  
         
         # learning parameters (default)
         self.lr = 1e-4
         self.n_epochs = 10
-        self.weight_decay = 0.001   # L2 regularization term 
-        self.patience = 5           # patience for earling stopping
+        self.weight_decay = 0.001       # L2 regularization term 
+        self.patience = 5               # patience for earling stopping
         self.type_early_stopping = "acc"
                 
     # ---------------- [initialization functions]
@@ -240,11 +234,8 @@ class EngagementClassifier(nn.Module):
             correct_predictions += (y_pred == y).sum()
             num_predictions += y_pred.shape[0]
             
-                
-        # mean_loss = sum(losses)/len(losses)
         accuracy = correct_predictions / num_predictions
         
-        # return mean_loss, accuracy
         loss_avg = sum(losses)/len(losses)
         return accuracy, loss_avg
         
@@ -265,12 +256,12 @@ class EngagementClassifier(nn.Module):
         self.model.train()
         
         # define optimizer, scheduler & scaler
-        
-
+    
         optimizer = Adam(self.model.parameters(), lr = self.lr, weight_decay =  self.weight_decay,)
         
-        scheduler = lr_scheduler.OneCycleLR(optimizer, max_lr=self.lr, steps_per_epoch=n_steps, epochs=self.n_epochs, pct_start=0.3)
-        # scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor = 0.5, patience = 5, cooldown = 2, min_lr = 1e-5, verbose = True) # reduce of a half the learning rate 
+        # scheduler = lr_scheduler.OneCycleLR(optimizer, max_lr=self.lr, steps_per_epoch=n_steps, epochs=self.n_epochs, pct_start=0.3)
+        # scheduler ReduceLROnPlateau, max mode if you accuracy as metric, if loss use min
+        scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor = 0.5, patience = 5, cooldown = 2, min_lr = 1e-5, verbose = True) # reduce of a half the learning rate 
         
         scaler = GradScaler()
         
@@ -340,10 +331,7 @@ class EngagementClassifier(nn.Module):
                         loss = self.focal_loss(y_pred = logits, y_true = y, alpha=self.class_weights ,reduction= 'sum')
                         
                         if verbose: print("loss ->", loss, type(loss))
-                        
-                        # probs  = self.output_af(logits, dim = 1)    # no used here, but needed for the full forward
-                        # if verbose: print("probabilities ->", probs,  type(probs), probs.shape)
-                    
+
                     loss_epoch += loss.item()         
                     tmp_loss += loss.item()
                     # 4) update step
@@ -361,7 +349,7 @@ class EngagementClassifier(nn.Module):
                     scaler.update()
                     
                     # update schedulers if one cycle LR
-                    scheduler.step()
+                    # scheduler.step()
                     
                     # print info every 50 steps 
                     if ((step_index+1)%loss_steps_freq)== 0:
@@ -423,7 +411,7 @@ class EngagementClassifier(nn.Module):
                     
                 
                 # based on the accuracy update the learning rate
-                # scheduler.step(acc)
+                scheduler.step(loss)
 
             # save last epoch if not already saved
             if not(saved):
@@ -481,15 +469,6 @@ class EngagementClassifier(nn.Module):
             predictions = np.append(predictions, y_pred.flatten(), axis  =0)
             targets = np.append(targets, label.flatten(), axis  =0)
             
-            
-        # print(predictions.shape)
-        # print(predictions)
-        # print(predictions.dtype)
-        
-        # print(targets.shape)
-        # print(targets)
-        # print(targets.dtype)
-        
         # compute metrics
         self._computeMetrics(output = predictions, targets= targets, name_model = name_model, epoch = str(epoch_model), save_results= True)        
         
@@ -574,8 +553,6 @@ class EngagementClassifier(nn.Module):
                 print("\nmetric: {}, result: {}".format(k,v))
             else:
                 print("Confusion matrix")
-                # for kcm,vcm in v.items():
-                #     print("\nconfusion matrix for: {}".format(kcm))
                 print(v)
         
         self.plot_cm(cm = metrics_results['confusion_matrix'], path_save = path_save, epoch = epoch, duration_timer= None)
@@ -613,29 +590,15 @@ class EngagementClassifier(nn.Module):
         if (path_save is not None) and (not os.path.exists(path_save)):
             os.makedirs(path_save)
         
-        # plt.style.use('dark_background')
-        
         # define x axis values
         x_values = list(range(1,len(loss_array)+1))
-        
-        # Generate an array of colors based on the values
-        # colors = np.arange(len(loss_array))
-        # plt.plot(x_values, loss_array, color = "red",linewidth=2)
-        # plt.scatter(x_values, loss_array, c=colors, cmap='cool')
-        
-        # Create a colormap
-        # cmap = colormaps.get_cmap('Reds')    
-        # norm = Normalize(vmin= min(loss_array), vmax= max(loss_array))
         
         color = "green"
     
         # Plot the array with a continuous line color
         for i in range(len(loss_array) -1):
-            # plt.plot([x_values[i], x_values[i + 1]], [loss_array[i], loss_array[i + 1]], color=cmap(norm(loss_array[i])) , linewidth=2)
             plt.plot([x_values[i], x_values[i + 1]], [loss_array[i], loss_array[i + 1]], color= color , linewidth=2)
             
-
-        
         # text on the plot
         if path_save is None:       
             plt.xlabel('steps', fontsize=18)
@@ -765,16 +728,6 @@ def test_loss_plotting():
     loss = [2,10,40,100,25,13,6,3,2,1]
     classifier.plot_loss(loss, 30, duration_timer= None)
 
-
-# test_forward_2DNet()
-# test_forward_3DNet()
-# test_training()
-# test_validation()
-# test_forward()
-# test_sampler()
-# test_loss_plotting()
-# test_testing()
-
 # ----------------------------------------------------------------------------------------training functions 
 
 def train_1():
@@ -877,16 +830,24 @@ def train_16():
     classifier.patience = 100
     classifier.train(name_model= "train_v2_batch8_gray_depth3_epochs100", save_model= True, verbose= False)   
 
-def train_17():  # to test
-    classifier = EngagementClassifier(batch_size= 16, version_dataset= 'v2', grayscale= True, depth_level= 1)
+def train_17():  # to test, 
+    classifier = EngagementClassifier(batch_size= 16, version_dataset= 'v2', grayscale= True, depth_level= 1) # use scheduler of lr one cycle
     classifier.n_epochs = 100
     classifier.patience = 20
     classifier.type_early_stopping = 'loss'
     classifier.train(name_model= "train_v2_batch16_gray_depth1_epochs100_patienceLoss20", save_model= True, verbose= False)    
-    
+ 
+ 
+def train_18():  # to test, 
+    classifier = EngagementClassifier(batch_size= 16, version_dataset= 'v2', grayscale= True, depth_level= 1) # use scheduler .ReduceLROnPlateau
+    classifier.n_epochs = 100
+    classifier.patience = 30
+    classifier.type_early_stopping = 'loss'
+    classifier.train(name_model= "train_v2_batch16_gray_depth1_epochs100_patienceLoss30", save_model= True, verbose= False)       
+
+
 if __name__ == "__main__":  
     pass
-    train_17()
 
 
 # buoni
