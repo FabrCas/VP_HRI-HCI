@@ -2,11 +2,13 @@
 import math
 import cv2 
 import numpy as np
-# import features detectors
 
+# import features detectors
 from featuresExtractors import FeaturesExtractor
 
-
+"""
+    class used from gaze pipeline to retrieve the data necessary for the score 
+"""
 class AttentionAnalyzer():
     
     def __init__(self):
@@ -180,9 +182,6 @@ class AttentionAnalyzer():
 
     def getGazeDirection(self, frame, out, to_show, mode = 'perc_avg', color = (0, 255, 0), thickness = 1, debug = True):
         
-        # get a copy of the original frame
-        # original_frame = np.copy(frame)
-        
         # compute the white pixel distribution ratio after applying a mask and segmenting
         le_left_white_pixels, le_right_white_pixels, le_up_white_pixels, le_down_white_pixels = self.getWhiteRatio(frame, out['left_eye_lm'],  out['left_eye_box'], name = "left eye", color = color, thickness = thickness,  debug = False)
         
@@ -263,11 +262,6 @@ class AttentionAnalyzer():
             perc_down_avg = (le_perc_down + re_perc_down)/2          # min: 0, max:1
             
             gazeY_direction = perc_up_avg - perc_down_avg                #min: -1, max: 1, positive -> down, negative -> up
-
-            # cv2.putText(frame, "gaze Y: " + str(gazeY_direction), (1000,20), fontFace= cv2.FONT_HERSHEY_DUPLEX, fontScale = 0.8, color= (255,255,255), thickness= 1)
-            # cv2.putText(frame, "perc_up:  " + str(perc_up_avg), (1000,40), fontFace= cv2.FONT_HERSHEY_DUPLEX, fontScale = 0.8, color= (255,255,255), thickness= 1)
-            # cv2.putText(frame, "perc_down: " + str(perc_down_avg), (1000,60), fontFace= cv2.FONT_HERSHEY_DUPLEX, fontScale = 0.8, color= (255,255,255), thickness= 1)
-
         
         # define the limits and round 
         if mode == 'ratio':

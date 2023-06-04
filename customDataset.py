@@ -32,9 +32,10 @@ from featuresExtractors import CNN_faceExtractor
     The labels were crowd annotated and correlated with a gold standard annotation created using a team of expert psychologists.
 """
 
-class CustomDaisee(Dataset):
+# class for that uses as superclass the Dataset from pytorch. It's needed to define the dataloader
+class CustomDataset(Dataset):
     def __init__(self, type_ds: str, version: str, grayscale: bool = False, verbose : bool = False, just_label : bool = False):
-        super(CustomDaisee).__init__()
+        super(CustomDataset).__init__()
         
         self.check_args(version, type_ds)
         self.type_ds    = type_ds
@@ -56,9 +57,7 @@ class CustomDaisee(Dataset):
         self.list_gts    =  sorted(os.listdir(self.path_dataset_labels),    key = get_id_labels)
         self.list_videos =  sorted(os.listdir(self.path_dataset_video),     key = get_id_video)
         
-        # self.random_augment = transforms.RandAugment()
         self.toTensor = transforms.ToTensor()
-        self.colorJitter = transforms.ColorJitter(brightness=0.1, contrast=0.2, saturation=0.3, hue=0.1)
       
     def check_args(self, version, type_ds):
         if (type_ds not in ['train', 'test', 'validation']) or (version not in ["v1", "v2","v3", "v4"]):
@@ -92,22 +91,16 @@ class CustomDaisee(Dataset):
             
             # sometimes last frame is None
             if frame is not None:
-                    # print(frame.shape)
-                    # print(frame)
                 
                 
                 # if self.grayscale and (len(frame.shape) == 2 or frame.shape[2]==1):   # look if it's needed, i.e. v4 doesn't need
                 if self.grayscale or self.version == 'v4':
                     frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-                    # frame = cv2.equalizeHist(frame)                     # compute histo equalization
                 else:
                     # from BGR to RGB if requested
                     if read_RGB:
                         frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                
-                # random augmentation uses 8bit int representation, values from 0 to 255
-                # frame = self.random_augment(T.tensor(frame))
-                
+
                 # convert image to a tensor with values between 0 and 1, and colors channel moved: from (w,h,c) -> (c,w,h)
                 frame = self.toTensor(frame)    # torch.Size([3, 480, 640])
                 
@@ -166,7 +159,8 @@ class CustomDaisee(Dataset):
         # Return the video and its label as a dictionary
         return frames, label
 
-class DatasetCustom():
+# Custom Daisee class, used to load and prepare the data
+class CustomDaisee():
     
     def __init__(self, batch_size = 1, version= 'v2', grayscale = False, verbose = False):
         
@@ -205,7 +199,7 @@ class DatasetCustom():
         return self.test_dataloader
 
     def get_dataloaderLabels(self, type_ds, version = "v1"):
-        custom_ds_train= CustomDaisee(type_ds = type_ds, version= version, just_label = True)
+        custom_ds_train= CustomDataset(type_ds = type_ds, version= version, just_label = True)
         dataloader_labelsTrain = DataLoader(custom_ds_train, batch_size= 1, num_workers= 0, shuffle= False)
         return dataloader_labelsTrain
         
@@ -232,7 +226,7 @@ class DatasetCustom():
         new_frame = np.sqrt(sobelx**2 + sobely**2)
         return new_frame
 
-    # First type of pre-processing enhancing the image
+    # v1 pre-processing: enhancing the image
     def preprocessImage(self, video, use_histo = False):
         video_frames_ppr = []
         
@@ -273,9 +267,6 @@ class DatasetCustom():
                         new_frame = transforms.Normalize(mean= (0,0,0), std = (1,1,1))(new_frame)
                     
                 # default normalization for values btw 0 and 1 already performed 
-
-            # back to the dimension: [width, height, colour]
-            # new_frame = new_frame.permute(1,2,0)  
             
             # includes all the frames in a list and then stack them
             video_frames_ppr.append(new_frame)    
@@ -287,117 +278,7 @@ class DatasetCustom():
         label_v[:,label[0]] = 1
         return label_v
     
-    # used to make the dataset more balanced in v2
-    def balanceLabels(self, type_ds, verbose = False):
-        laoder = self.get_dataloaderLabels(type_ds = type_ds)
-
-        # compute occurrences of labels
-        class_freq={}
-        labels = []
-        
-        total = len(laoder)
-        for y  in tqdm(laoder, total= total):
-            l = y.item()
-            if l not in class_freq.keys():
-                class_freq[l] = 1
-            else:
-                class_freq[l] = class_freq[l]+1
-            labels.append(l)
-        
-        n_labels = len(labels)   
-        # sorting the dictionary by key
-        class_freq = {k: class_freq[k] for k in sorted(class_freq.keys())}
-        
-        if verbose: print("class frequency: ->", class_freq)
-        
-        min_freq = min(class_freq.items(), key= lambda x: x[1])
-        if verbose: print("minimum frequency ->", min_freq)
-        
-        max_freq = max(class_freq.items(), key= lambda x: x[1])
-        if verbose: print("maximum frequency ->", max_freq)
-        
-        # indices for each label
-        indices_0 = [idx for idx, val in enumerate(labels) if val == 0]
-        indices_1 = [idx for idx, val in enumerate(labels) if val == 1]
-        indices_2 = [idx for idx, val in enumerate(labels) if val == 2]
-        indices_3 = [idx for idx, val in enumerate(labels) if val == 3]
-        
-        # complete list of indices
-        indices = {0:indices_0, 1:indices_1, 2:indices_2, 3:indices_3}
-        
-        if verbose: print("lenght indices:", len(indices_0), len(indices_1), len(indices_2), len(indices_3))
-
-        # dict of sampled indices
-        sampled_indices = {}
-        
-        for k,v in class_freq.items():
-            if k != min_freq[0]:
-                multiplier = ((n_labels - v)/(n_labels)) * 0.25
-                
-                
-                # 20% of the actual values + the number of minimum samples
-                n_sample = int(v*multiplier) # + min_freq[1]
-                if n_sample > v:
-                    n_sample = v
-                
-                if verbose: print(f"n_sample for {k} -> {n_sample}")
-                sampled_indices[k] = random.sample(indices[k], n_sample)
-            else:
-                if verbose: print(f"n_sample for {k} -> {v}")
-                
-                sampled_indices[k] = indices[k]
-            
-
-        # build the flat list with the sorted indices selected
-        final_list = []
-        for k,v in sampled_indices.items():
-            final_list = [*final_list, *v] 
-        
-        final_list = sorted(final_list)
-        
-        if verbose: print("number of samples after the reduction: ", len(final_list))
-
-        return class_freq, final_list
-    
-    # ------------------------- data loading and managing
-    
-    def loadJson(self, path):
-        with open(path, "r") as file:
-            json_data = file.read()
-        data =  json.loads(json_data)
-        return data
-    
-    def save_video(self, frames, file_path, w = None, h = None ): # frames dimensions [frame, width, height, colors], colors rgb
-        """
-            Save the video as a RGB stream of data
-        """
-        if w is None: self.w
-        if h is None: self.h
-
-        # Create a VideoWriter object
-        video_writer = cv2.VideoWriter(file_path, self.fourcc, 30, (w, h))
-
-        # Write each frame to the video file
-        for frame in frames:
-            
-            # save the video in RGB convention, then when will be loaded using cv2, it turns back in BGR
-            # Convert the frame from BGR to RGB
-            # if frame.shape[2] == 3:
-            try:
-                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            except:
-                pass
-            
-            # Convert the frame to uint8 if necessary
-            if frame.dtype != np.uint8:
-                frame = (frame * 255).astype(np.uint8)
-                
-            # Write the frame to the video file
-            video_writer.write(frame)
-            
-        # Release the VideoWriter object and close the video file
-        video_writer.release()
-    
+    # v2 pre-processing
     def extract_face_video(self, extractor, path, threshold_update = 5, show = False):
         
         # define dimensions for the new frame
@@ -513,6 +394,7 @@ class DatasetCustom():
         # print(video.shape) 
         return video, reshape_w, reshape_h  # return numpy array
     
+    # v4 pre-processing
     def preprocessingV4(self, path, show = False):
         
         # define the empty list that will contains the frames
@@ -582,6 +464,119 @@ class DatasetCustom():
         
         return video
         
+    
+    # used to make the dataset more balanced in v2
+    def balanceLabels(self, type_ds, verbose = False):
+        laoder = self.get_dataloaderLabels(type_ds = type_ds)
+
+        # compute occurrences of labels
+        class_freq={}
+        labels = []
+        
+        total = len(laoder)
+        for y  in tqdm(laoder, total= total):
+            l = y.item()
+            if l not in class_freq.keys():
+                class_freq[l] = 1
+            else:
+                class_freq[l] = class_freq[l]+1
+            labels.append(l)
+        
+        n_labels = len(labels)   
+        
+        # sorting the dictionary by key
+        class_freq = {k: class_freq[k] for k in sorted(class_freq.keys())}
+        
+        if verbose: print("class frequency: ->", class_freq)
+        
+        min_freq = min(class_freq.items(), key= lambda x: x[1])
+        if verbose: print("minimum frequency ->", min_freq)
+        
+        max_freq = max(class_freq.items(), key= lambda x: x[1])
+        if verbose: print("maximum frequency ->", max_freq)
+        
+        # indices for each label
+        indices_0 = [idx for idx, val in enumerate(labels) if val == 0]
+        indices_1 = [idx for idx, val in enumerate(labels) if val == 1]
+        indices_2 = [idx for idx, val in enumerate(labels) if val == 2]
+        indices_3 = [idx for idx, val in enumerate(labels) if val == 3]
+        
+        # complete list of indices
+        indices = {0:indices_0, 1:indices_1, 2:indices_2, 3:indices_3}
+        
+        if verbose: print("lenght indices:", len(indices_0), len(indices_1), len(indices_2), len(indices_3))
+
+        # dict of sampled indices
+        sampled_indices = {}
+        
+        for k,v in class_freq.items():
+            if k != min_freq[0]:
+                multiplier = ((n_labels - v)/(n_labels)) * 0.25
+                
+                
+                # 20% of the actual values + the number of minimum samples
+                n_sample = int(v*multiplier) # + min_freq[1]
+                if n_sample > v:
+                    n_sample = v
+                
+                if verbose: print(f"n_sample for {k} -> {n_sample}")
+                sampled_indices[k] = random.sample(indices[k], n_sample)
+            else:
+                if verbose: print(f"n_sample for {k} -> {v}")
+                
+                sampled_indices[k] = indices[k]
+            
+
+        # build the flat list with the sorted indices selected
+        final_list = []
+        for k,v in sampled_indices.items():
+            final_list = [*final_list, *v] 
+        
+        final_list = sorted(final_list)
+        
+        if verbose: print("number of samples after the reduction: ", len(final_list))
+
+        return class_freq, final_list
+    
+    # ------------------------- data loading and managing
+    
+    def loadJson(self, path):
+        with open(path, "r") as file:
+            json_data = file.read()
+        data =  json.loads(json_data)
+        return data
+    
+    def save_video(self, frames, file_path, w = None, h = None ): # frames dimensions [frame, width, height, colors], colors rgb
+        """
+            Save the video as a RGB stream of data
+        """
+        if w is None: self.w
+        if h is None: self.h
+
+        # Create a VideoWriter object
+        video_writer = cv2.VideoWriter(file_path, self.fourcc, 30, (w, h))
+
+        # Write each frame to the video file
+        for frame in frames:
+            
+            # save the video in RGB convention, then when will be loaded using cv2, it turns back in BGR
+            # Convert the frame from BGR to RGB
+            # if frame.shape[2] == 3:
+            try:
+                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            except:
+                pass
+            
+            # Convert the frame to uint8 if necessary
+            if frame.dtype != np.uint8:
+                frame = (frame * 255).astype(np.uint8)
+                
+            # Write the frame to the video file
+            video_writer.write(frame)
+            
+        # Release the VideoWriter object and close the video file
+        video_writer.release()
+    
     def download_dataset(self):
         """
             downlaod dataset train, validation and test set. Sava in the data folder
@@ -654,21 +649,6 @@ class DatasetCustom():
                 # get label descrition
                 label_description = y_data["text"][0]
                 
-                if self.verbose:
-                    print(frames.shape)
-                    print(timestamps.shape)
-                    print(label)
-                    print(label_description)
-                    
-                    print(type(frames))
-                    print(type(timestamps))
-                    print(type(label))
-                    print(type(label_description))
-                    
-                    frame = frames[0].permute((1,2,0)).numpy()
-                    plt.imshow(frame)
-                    print(frame.shape)
-                    plt.show()
                 
                 # convert everything in list, no needed for label_description(str)
                 timestamps      = list(timestamps)
@@ -825,9 +805,6 @@ class DatasetCustom():
                 old_video_path = os.path.join("./data/customDAISEE_v1", type_ds, "video", name)
                 new_video_path = os.path.join(path_save_x, name)
                 shutil.copyfile(old_video_path, new_video_path)
-                
-                # new_video, new_w, new_h = self.extract_face_video(face_extractor, old_video_path, show = False)
-                # self.save_video(new_video, new_video_path, w= new_w, h= new_h)
         
         else: # already built
             return 
@@ -924,11 +901,10 @@ class DatasetCustom():
                         (os.path.exists("./EAI1/data/hub_activeloop_daisee-validation")) ):
                     print("No data found locally, starting the download...")
                     
-                    # TODO reinsert the autodownload
-                    # self.download_dataset()
+                    self.download_dataset()
                     
                     # retry after the download
-                    # return self.load_dataset_offline(workers)
+                    return self.load_dataset_offline(workers)
                     
         if version in ['v2', 'v4']:                 # v4 needs v2
             if not(os.path.exists(path_v2)):
@@ -953,13 +929,13 @@ class DatasetCustom():
             
         # create pytorch datasets and get the dataloaders
         
-        custom_ds_train= CustomDaisee(type_ds="train", version= version, grayscale= self.grayscale)
+        custom_ds_train= CustomDataset(type_ds="train", version= version, grayscale= self.grayscale)
         train_dataloader = DataLoader(custom_ds_train, batch_size= self.batch_size, num_workers= workers, shuffle= True)   
         
-        custom_ds_valid= CustomDaisee(type_ds="validation", version= version, grayscale= self.grayscale)  
+        custom_ds_valid= CustomDataset(type_ds="validation", version= version, grayscale= self.grayscale)  
         valid_dataloader = DataLoader(custom_ds_valid, batch_size= self.batch_size, num_workers= workers, shuffle= False)
         
-        custom_ds_test= CustomDaisee(type_ds="test", version= version, grayscale= self.grayscale) 
+        custom_ds_test= CustomDataset(type_ds="test", version= version, grayscale= self.grayscale) 
         test_dataloader = DataLoader(custom_ds_test, batch_size= self.batch_size, num_workers= workers, shuffle= False)
            
         # set the dataloaders
@@ -1056,29 +1032,21 @@ class DatasetCustom():
             
             video               = T.squeeze(data[0], dim= 0)  # remove batch dimension
             label               = T.squeeze(data[1], dim = 0)
-            # timestamps          = T.squeeze(data[2], dim=0)
-            # label_description   = data[3][0]
             
             # show types
             print(type(video))
             print(type(label))
-            # print(type(timestamps))
-            # print(type(label_description))
-            
+
             # show shapes
             print(video.shape)
             print(label.shape)
-            # print(timestamps.shape)
+
         
             # show value label
             print(label)
-            # print(label_description)
-            
+
             # show first frame and its dimension 
             for frame in video:
-                
-                # print(frame.shape)
-                # print(frame)
                 
                 if show_frames: 
                     # using matplotlib, it expects RGB channels, so the image is alterated 
@@ -1114,12 +1082,6 @@ def test_fetch_speed(dataloader = None):
 if __name__ == "__main__":  
     dataset = Dataset(batch_size=1, version='v2', grayscale= True)
     dataset.print_loaderCustomDaisee(dataset.get_validationSet())
-
-    freq, distr = dataset.balanceLabels(type_ds="validation", verbose= True)
-    print(freq)
-    print(distr)
-    test_fetch_speed(dataloader)
-
 
 
 

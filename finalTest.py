@@ -23,6 +23,7 @@ from attentionAnalyzer import AttentionAnalyzer
 
 
 
+# custom daisee Dataset (torch) to load the data 
 class CustomDaisee(Dataset):
     def __init__(self, path_dataset: str, grayscale: bool = False, verbose : bool = False, ):
         super(CustomDaisee).__init__()
@@ -168,19 +169,13 @@ def computeMetrics(output, targets, scores, prog: int, save_results = True):  #l
                         "accuracy":         accuracy_score(targets, output, normalize= True),
                         
                         
-                        "precision":        precision_score(targets, output, average = "macro", zero_division=1,),    \
-                        "recall":           recall_score(targets, output, average = "macro", zero_division=1),         \
-                        "f1-score":         f1_score(targets, output, average= "macro", zero_division=1),            \
-                        "jaccard_score":    jaccard_score(targets, output, average= "macro", zero_division=1),  \
-                        "hamming_loss":     hamming_loss(targets,output),
-                        "MAE":              mean_absolute_error(targets_score, scores),
-                        "%MSE":             mean_absolute_percentage_error(targets_score, scores),
-                                        
-                        # "precision":        precision_score(targets, output, average = "micro", zero_division=1,),    \
-                        # "recall":           recall_score(targets, output, average = "micro", zero_division=1),         \
-                        # "f1-score":         f1_score(targets, output, average= "micro", zero_division=1),            \
-                        # "jaccard_score":    jaccard_score(targets, output, average= 'micro', zero_division=1),  \
-                            
+                        "precision":        precision_score(targets, output, average = "macro", zero_division=1,),      \
+                        "recall":           recall_score(targets, output, average = "macro", zero_division=1),          \
+                        "f1-score":         f1_score(targets, output, average= "macro", zero_division=1),               \
+                        "jaccard_score":    jaccard_score(targets, output, average= "macro", zero_division=1),          \
+                        "hamming_loss":     hamming_loss(targets,output),                                               \
+                        "MAE":              mean_absolute_error(targets_score, scores),                                 \
+                        "%MSE":             mean_absolute_percentage_error(targets_score, scores),                      \
                         "confusion_matrix": confusion_matrix(targets,output, labels= [0,1,2,3], normalize= None)
     
         }
@@ -198,8 +193,6 @@ def computeMetrics(output, targets, scores, prog: int, save_results = True):  #l
             print("\nmetric: {}, result: {}".format(k,v))
         else:
             print("Confusion matrix")
-            # for kcm,vcm in v.items():
-            #     print("\nconfusion matrix for: {}".format(kcm))
             print(v)
     
     plot_cm(cm = metrics_results['confusion_matrix'], path_save = path_save, prog = str(prog), duration_timer= None)
@@ -262,7 +255,7 @@ def sample_frames(x, n_frames: int = 60, fps_sampling:int = 15, verbose = False)
         if verbose: print(f"sampled {round((scaler*n_frames)/30, 4)}[s] of video")
         return x_sampled
 
-
+# get score from the engagement degree label
 def label2score(label):
     if label == 0:
         return 0.1
@@ -273,6 +266,7 @@ def label2score(label):
     elif label == 3:
         return 1.0
 
+# get the engagement degree label from the score
 def score2label(score):
     dist = lambda x: abs(x - score)
     
@@ -284,7 +278,8 @@ def score2label(score):
 
 
 def launch_finalTest(model, grayscale = True, verbose = False, prog = 0):
-    path_test = "./data/customDAISEE_v3/test"
+    # path_test = "./data/customDAISEE_v3/test"
+    path_test = "./data/customDAISEE_v1/test"
     custom_ds_test= CustomDaisee(path_test) 
     test_dataloader = DataLoader(custom_ds_test, batch_size= 1, num_workers= 0, shuffle= False)
     n_steps = len(test_dataloader)
@@ -336,7 +331,11 @@ def launch_finalTest(model, grayscale = True, verbose = False, prog = 0):
             
             # extract the face for model B
             face = frame[out['face_box'][0][1]: out['face_box'][1][1], out['face_box'][0][0]: out['face_box'][1][0]]
-            face = cv2.resize(face, (dims_face[0], dims_face[1]), interpolation = cv2.INTER_LINEAR)
+            try:
+                face = cv2.resize(face, (dims_face[0], dims_face[1]), interpolation = cv2.INTER_LINEAR)
+            except: 
+                continue
+            
             if grayscale: face = cv2.cvtColor(face, cv2.COLOR_BGR2GRAY)
             faces.append(face)       
             
@@ -400,7 +399,10 @@ def launch_finalTest(model, grayscale = True, verbose = False, prog = 0):
     
                 
         computeMetrics(output = predictions, targets= targets, scores = scores, prog = prog + "_" + str(alpha), save_results= True) 
-        
+
+
+# launch the test for the whole applicative
+ 
 # def launch_finalTest(model, alpha = 0.5, grayscale = True, verbose = False, prog = 0):
 #     path_test = "./data/customDAISEE_v3/test"
 #     custom_ds_test= CustomDaisee(path_test) 
@@ -513,7 +515,9 @@ def launch_finalTest(model, grayscale = True, verbose = False, prog = 0):
 #         launch_finalTest(model, alpha = alphas[i], grayscale= True, verbose= False, prog= str(i +1) + letter)
          
 
-# tests 
+# ------------------------------------ tests 
+if __name__== "__main__":
+    pass
 
 # a 
 # model = EngagementClassifier(grayscale= True, depth_level= 1)
@@ -528,26 +532,56 @@ def launch_finalTest(model, grayscale = True, verbose = False, prog = 0):
 
 
 # c
-model = EngagementClassifier(grayscale= True, depth_level= 2)
-model.loadModel(epoch = 55, path_folder="train_v2_batch16_gray_depth2_epochs100_patience30_01-06-2023")
-launch_finalTest(model, grayscale= True, verbose= False, prog= "c")
+# model = EngagementClassifier(grayscale= True, depth_level= 2)
+# model.loadModel(epoch = 55, path_folder="train_v2_batch16_gray_depth2_epochs100_patience30_01-06-2023")
+# launch_finalTest(model, grayscale= True, verbose= False, prog= "c")
 
-# d 
-model = EngagementClassifier(grayscale= True, depth_level= 2)
-model.loadModel(epoch = 45, path_folder="train_v2_batch16_gray_depth2_epochs80_01-06-2023")
-launch_finalTest(model, grayscale= True, verbose= False, prog= "d")
+# # d 
+# model = EngagementClassifier(grayscale= True, depth_level= 2)
+# model.loadModel(epoch = 45, path_folder="train_v2_batch16_gray_depth2_epochs80_01-06-2023")
+# launch_finalTest(model, grayscale= True, verbose= False, prog= "d")
 
-# e
-model = EngagementClassifier(grayscale= True, depth_level= 2)
-model.loadModel(epoch = 60, path_folder="train_v2_batch16_gray_depth2_epochs80_01-06-2023")
-launch_finalTest(model, grayscale= True, verbose= False, prog= "e")
+# # e
+# model = EngagementClassifier(grayscale= True, depth_level= 2)
+# model.loadModel(epoch = 60, path_folder="train_v2_batch16_gray_depth2_epochs80_01-06-2023")
+# launch_finalTest(model, grayscale= True, verbose= False, prog= "e")
 
-# f
-model = EngagementClassifier(grayscale= True, depth_level= 3)
-model.loadModel(epoch = 15, path_folder="train_v2_batch8_gray_depth3_epochs100_02-06-2023")
-launch_finalTest(model, grayscale= True, verbose= False, prog= "f")
+# # f
+# model = EngagementClassifier(grayscale= True, depth_level= 3)
+# model.loadModel(epoch = 15, path_folder="train_v2_batch8_gray_depth3_epochs100_02-06-2023")
+# launch_finalTest(model, grayscale= True, verbose= False, prog= "f")
 
-# g
-model = EngagementClassifier(grayscale= True, depth_level= 3)
-model.loadModel(epoch = 100, path_folder="train_v2_batch8_gray_depth3_epochs100_02-06-2023")
-launch_finalTest(model, grayscale= True, verbose= False, prog= "g")
+# # g
+# model = EngagementClassifier(grayscale= True, depth_level= 3)
+# model.loadModel(epoch = 100, path_folder="train_v2_batch8_gray_depth3_epochs100_02-06-2023")
+# launch_finalTest(model, grayscale= True, verbose= False, prog= "g")
+
+
+#-------------------------------------------on v1
+# h
+#on v1
+# model = EngagementClassifier(grayscale= True, depth_level= 1)
+# model.loadModel(epoch = 50, path_folder="train_v2_batch16_gray_depth1_epochs100_01-06-2023")
+# launch_finalTest(model, grayscale= True, verbose= False, prog = "h")
+
+
+# i
+#on v1
+# model = EngagementClassifier(grayscale= True, depth_level= 1)
+# model.loadModel(epoch = 55, path_folder="train_v2_batch16_gray_depth1_epochs100_01-06-2023")
+# launch_finalTest(model, grayscale= True, verbose= False, prog = "i")
+
+
+
+#l
+#on v1
+# model = EngagementClassifier(grayscale= True, depth_level= 2)
+# model.loadModel(epoch = 55, path_folder="train_v2_batch16_gray_depth2_epochs100_patience30_01-06-2023")
+# launch_finalTest(model, grayscale= True, verbose= False, prog= "l")
+
+
+#m
+#on v1
+# model = EngagementClassifier(grayscale= True, depth_level= 2)
+# model.loadModel(epoch = 45, path_folder="train_v2_batch16_gray_depth2_epochs80_01-06-2023")
+# launch_finalTest(model, grayscale= True, verbose= False, prog= "m")

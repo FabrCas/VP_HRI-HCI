@@ -12,6 +12,8 @@ import matplotlib.pyplot as plt
 from featuresExtractors import CNN_faceExtractor, FeaturesExtractor
 from attentionAnalyzer import AttentionAnalyzer
 
+
+# class use to read data from the webcam and expose the results from the scorer using also the plotter
 class WebcamReader(object):
     def __init__(self, frame_rate = 15, resolution = 720):
         super().__init__()
@@ -55,13 +57,8 @@ class WebcamReader(object):
         if not('data' in os.listdir()):
             os.makedirs(self.path_save)
         
-        # os.chdir("data")
-            
         if not(os.path.exists('data/webcam_records')):
                 os.makedirs('data/webcam_records')
-                
-        # if not('data/webcam_records' in os.listdir()):
-        #     os.mkdir("data/webcam_records")
             
     def _get_prog_captures(self):
         files = os.listdir(self.path_save)
@@ -80,7 +77,7 @@ class WebcamReader(object):
     def _open(self, candidate_id = None):
         
         # give name to the window
-        # cv2.namedWindow('Webcam')
+        cv2.namedWindow('Webcam')
 
         # Initialize the video capture object
         self.capturer = cv2.VideoCapture(0)
@@ -91,21 +88,15 @@ class WebcamReader(object):
         self.capturer.set(cv2.CAP_PROP_FPS, self.frame_rate)
         
         # Define the codec and create a VideoWriter object
-        # self.fourcc = cv2.VideoWriter_fourcc(*'H264')                                                                                   # fourcc = cv2.VideoWriter_fourcc(*'XVID')
-        # self.writer = cv2.VideoWriter(self.path_save + '/capture.mp4', self.fourcc, self.frame_rate, (self.width, self.height))         # out = cv2.VideoWriter('output.avi', fourcc, 30.0, (640, 480))
- 
-        # self.fourcc = cv2.VideoWriter_fourcc(*'XVID')
         self.fourcc = cv2.VideoWriter_fourcc(*'mp4v')
         
         
         if candidate_id is not(None):
             progressive = self._get_prog_captures()
-            # path = self.path_save + '/' + str(progressive) + '_' + str(candidate_id) + '_' +'testSet.avi'
             path = self.path_save + '/' + str(progressive) + '_' + str(candidate_id) + '_' +'testSet.mp4'
             print(path)
             try:
                 print("fps recording -> ", self.capturer.get(cv2.CAP_PROP_FPS))
-                # self.writer = cv2.VideoWriter(path, self.fourcc, webcam.capturer.get(cv2.CAP_PROP_FPS), (self.width, self.height))
                 self.writer = cv2.VideoWriter(path, self.fourcc, self.frame_rate, (self.width, self.height))
             except:
                 print("no available path to save")
@@ -271,7 +262,8 @@ class WebcamReader(object):
                     break
                 
         self._close()
-        
+    
+    # main function for the class, show the final results from the attention analyzer
     def showAnalyzer(self, scorer, plotter, monitor_idx = 1, resolution_window = (1280,720)):
         
         self._open()
@@ -338,7 +330,6 @@ class WebcamReader(object):
         self._close()
     
     # read method for video source
-    
     def readVideo(self, name_file, output_size = None, show = True):
         """
             function to read any video, choose the size and whether to show the content.
@@ -393,7 +384,8 @@ class WebcamReader(object):
         
         # return the numpy array representing the video frames
         return np.array(frames)
-          
+  
+# plotter class to draw the plot on the video frames      
 class Plotter(object):
     
     def __init__(self, resolution = 720, max_values = 100, color_rf = (255,255,255), color_values = (0, 255,0)):
@@ -453,8 +445,6 @@ class Plotter(object):
         return frame
         
     def _initialize_data(self):
-        
-
         
         # first values for x and y, and the starting one
         self.x = self.margin_x
@@ -522,9 +512,6 @@ class Plotter(object):
             frame = self._draw_rf(frame)
             return frame
             
-        
-        # store the new data
-        
         # clip value if necessary
         value_y  = self._clip(value)
         
@@ -546,14 +533,14 @@ class Plotter(object):
         
            
         for i in range(len(self.x_data) -1):            
-            # color = self.value2color( (-1*(self.y_data[i+1] - self.y_base))/self.height_plot )
-            # frame = cv2.line(frame, (self.x_data[i],  self.y_data[i]), (self.x_data[i+1],  self.y_data[i+1]), color = color, thickness = 3)
             frame = cv2.line(frame, (self.x_data[i],  self.y_data[i]), (self.x_data[i+1],  self.y_data[i+1]), color = self.value2color(value), thickness = 3)
 
         frame = self._draw_rf(frame)
         
         return frame
-        
+  
+  
+# scorer class to produce the attention score    
 class Scorer(object):
     
     def __init__(self, model = None, alpha = 0.5):
@@ -573,8 +560,6 @@ class Scorer(object):
         """
             functions that normalize to have a value between 0 and 1
         """
-        # min_value = 0
-        # max_value = 0.5
         normalized_value = (value - min_value) / (max_value - min_value)
         
         return normalized_value
@@ -611,7 +596,8 @@ class Scorer(object):
             return 1
         else:
             return value
-        
+    
+    # compute the score jsut for the gaze pipeline 
     def forward_scoreA(self, frame, infoAnalyzer):
         if infoAnalyzer is None:
             return frame, 0
@@ -632,26 +618,22 @@ class Scorer(object):
 
         if not(abs(offset_h) < int(frame.shape[1]/6)):  # not centred respect the camera
             if offset_h < 0:   # face on right respect center
-                # print("to the right")
                 offset_h = self.normalize(abs(offset_h), 0, max_offset_h) * 3/5    # positive value between 0 and 0.5
                 limit_right -= offset_h
                 limit_left  -= offset_h
-                # print(offset_h)
+
                 
             else:              # face on the left respect center
-                # print("to the left")
                 offset_h = self.normalize(abs(offset_h), 0, max_offset_h)/2 *3/5   # positive value between 0 and 0.5
                 limit_right += offset_h
                 limit_left  += offset_h
                 
         else: # you are central use the yaw angle
             if infoAnalyzer['angleYaw'] > 20:       # increment right bound
-                # print("turned left")
                 limit_right += math.sin(math.radians(infoAnalyzer['angleYaw'] -10)) # sum positive quantity
                 limit_left  += math.sin(math.radians(infoAnalyzer['angleYaw'] - 10))
                 
             elif infoAnalyzer['angleYaw'] < -20:    # increment left bound        
-                # print("turned right")
                 limit_left += math.sin(math.radians(infoAnalyzer['angleYaw'] + 10))   # sum negative quantity
                 limit_right += math.sin(math.radians(infoAnalyzer['angleYaw'] + 10))
                 
@@ -667,7 +649,6 @@ class Scorer(object):
         
         elif limit_right <= infoAnalyzer['gazeX']:
             h_error = infoAnalyzer['gazeX']  - limit_right
-            # h_error = self.normalize(h_error, 0, 1)/2
             h_error = self.normalize(h_error, 0, 0.7)*2                             
 
 
@@ -687,14 +668,13 @@ class Scorer(object):
         else:
             error = h_error + v_error
             
-        # error = self.normalize(h_error + v_error, 0, 1)
         score_A -= error
         score_A = self._clip(score_A)
         
         return score_A
 
         
-        
+    # compute the score jsut for the whole pipelie
     def forward(self, frame, infoAnalyzer, to_show = ['gaze analytics'], grayscale = False):
         """
             infoAnalyzer a dictionary with the following keys:'ratioX', 'ratioY', 'angleYaw', 'limits', 'face_box'
@@ -704,7 +684,6 @@ class Scorer(object):
         # 1) if no face has been detected, returns 0
         if infoAnalyzer is None:
             return frame, 0
-        
         
         #                                                   [score A]
         face_box = infoAnalyzer['face_box']
@@ -716,10 +695,6 @@ class Scorer(object):
         # grayscale if requested
         if grayscale: face_frame = cv2.cvtColor(face_frame, cv2.COLOR_BGR2GRAY)
         
-        # plt.imshow(face_frame, cmap='gray')
-        # plt.show()
-        # print(face_frame.shape)
-        
         self.frames.append(face_frame)
         
         if len(self.frames) < 60:
@@ -728,8 +703,6 @@ class Scorer(object):
         # if more, remove the first element
         elif len(self.frames) > 60:
             self.frames.pop(0)
-            
-        # print(len(self.frames))
         
         # 3) update dynamic limits
         limit_up = infoAnalyzer['limits']['up']
@@ -752,26 +725,22 @@ class Scorer(object):
 
         if not(abs(offset_h) < int(frame.shape[1]/6)):  # not centred respect the camera
             if offset_h < 0:   # face on right respect center
-                # print("to the right")
                 offset_h = self.normalize(abs(offset_h), 0, max_offset_h) * 3/5    # positive value between 0 and 0.5
                 limit_right -= offset_h
                 limit_left  -= offset_h
-                # print(offset_h)
+
                 
             else:              # face on the left respect center
-                # print("to the left")
                 offset_h = self.normalize(abs(offset_h), 0, max_offset_h)/2 *3/5   # positive value between 0 and 0.5
                 limit_right += offset_h
                 limit_left  += offset_h
                 
         else: # you are central use the yaw angle
             if infoAnalyzer['angleYaw'] > 20:       # increment right bound
-                # print("turned left")
                 limit_right += math.sin(math.radians(infoAnalyzer['angleYaw'] -10)) # sum positive quantity
                 limit_left  += math.sin(math.radians(infoAnalyzer['angleYaw'] - 10))
                 
             elif infoAnalyzer['angleYaw'] < -20:    # increment left bound        
-                # print("turned right")
                 limit_left += math.sin(math.radians(infoAnalyzer['angleYaw'] + 10))   # sum negative quantity
                 limit_right += math.sin(math.radians(infoAnalyzer['angleYaw'] + 10))
                 
@@ -819,7 +788,6 @@ class Scorer(object):
         
         elif limit_right <= infoAnalyzer['gazeX']:
             h_error = infoAnalyzer['gazeX']  - limit_right
-            # h_error = self.normalize(h_error, 0, 1)/2
             h_error = self.normalize(h_error, 0, 0.7)*2                             
 
 
@@ -846,7 +814,6 @@ class Scorer(object):
         else:
             error = h_error + v_error
             
-        # error = self.normalize(h_error + v_error, 0, 1)
         score_A -= error
         score_A = self._clip(score_A)
         
@@ -865,12 +832,8 @@ class Scorer(object):
             # forward model
             y_pred = self.model.forward(frames)[0]
             
-            # print(y_pred)
-            
             # get score
             score_B = self.label2score(y_pred)
-            
-            # print(score_B)
             
             # final weighted score
             score = self.alpha * score_A + (1-self.alpha) * score_B

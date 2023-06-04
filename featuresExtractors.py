@@ -10,7 +10,6 @@ import dlib
 
 
 # ---------- Face extractors 
-
 class Haar_faceExtractor(object):
     """
         Fast Face extractor using haarcascades algorithm
@@ -114,8 +113,7 @@ class CNN_faceExtractor(object):
         if cv2.cuda.getCudaEnabledDeviceCount() > 0:
             self.model.setPreferableBackend(cv2.dnn.DNN_BACKEND_CUDA)
             self.model.setPreferableTarget(cv2.dnn.DNN_TARGET_CUDA)
-        # else:
-        #     print("Not found GPU")
+
 
     def download_model_files(self):
         # prepare file system pointer  
@@ -180,8 +178,6 @@ class CNN_faceExtractor(object):
             return boxes   # [self.getImageFromBox(box, img) for box in boxes], 
         
         else:
-            # for i in range(0, detections.shape[2]):
-            #     confidence = detections[0, 0, i, 2]
                 
             confidences = [[detections[0, 0, i, 2], i] for i in range(0, detections.shape[2])]
             # print(confidences)
@@ -637,14 +633,3 @@ def test_LMDetection(features_extractor: FeaturesExtractor):
     
 if __name__ == "__main__":
     pass
-    # face_extractor = Haar_faceExtractor(verbose = True)
-    # eye_extractor = Haar_eyesDectector(verbose =  True)
-    # test_extractors(face_extractor, eye_extractor)
-
-    # face_extractor = CNN_faceExtractor(verbose = True)
-    # test_extractors(face_extractor)
-    # test_getFaces(face_extractor)
-
-
-    # ext = FeaturesExtractor()
-    # test_LMDetection(ext)
